@@ -1,0 +1,37 @@
+services:
+  hope-volunteer:
+    build: .
+    image: hope-volunteer
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATA_DIR: /data
+      PORT: "3000"
+      BIND_HOST: 0.0.0.0
+      # The published port arrives from this network: the gateway under Docker,
+      # the container's own address under rootless Podman. See README before changing the subnet.
+      TRUST_PROXY: 172.30.0.0/24
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:3020:3000"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 100
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    restart: unless-stopped
+
+# A fixed subnet keeps the gateway, and so TRUST_PROXY, the same when the network is recreated.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+          gateway: 172.30.0.1

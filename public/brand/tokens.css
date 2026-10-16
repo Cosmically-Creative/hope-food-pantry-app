@@ -1,0 +1,19 @@
+/* Hope Volunteer brand tokens
+   Source: bundled fallback from the October 14, 2026 specification
+   Synced: not synced
+   This is the fallback. scripts/sync-brand.mjs replaces this file when BRAND_SRC contains tokens.css.
+*/
+
+:root {
+  --hope-blue-50:#f4fafd;
+  --hope-blue-75:#ecf7fc;
+  --hope-blue-100:#e4f3fb;
+  --hope-yellow:#f9e194;
+  --hope-gold:#fbcd62;
+  --hope-ink:#222;
+  --hope-ink-2:#444;
+  --hope-border:#b6c2c9;
+  --hope-border-2:#cddbe2;
+  --font-body:"Lexend",system-ui,sans-serif;
+  --font-script:"Charm",cursive;
+}

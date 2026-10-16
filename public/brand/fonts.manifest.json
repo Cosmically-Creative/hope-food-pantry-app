@@ -1,0 +1,34 @@
+{
+  "source": null,
+  "syncedAt": null,
+  "note": "Bundled Lexend (variable, latin) and Charm (400 and 700, latin) so the app matches hopefoodpantrysc.org without loading fonts from Google. Both families are under the SIL Open Font License; the license text is beside the font files.",
+  "fonts": [
+    {
+      "file": "lexend-latin.woff2",
+      "bytes": 39680,
+      "sha256": "b7e7538f59bff1812841d7627f8e49e70fe86438f9f7b397a028c0d05301c874"
+    },
+    {
+      "file": "charm-400.woff2",
+      "bytes": 20108,
+      "sha256": "a5b1aaccacbe192e382f24fa211f57013e8844a32124f08d685262c49edff9f8"
+    },
+    {
+      "file": "charm-700.woff2",
+      "bytes": 20476,
+      "sha256": "3146c99b01bc5fb2537a2b7e10a1953f4c5a614780e3a6d1124b7e884b315cd3"
+    }
+  ],
+  "licenses": [
+    {
+      "file": "fonts/Lexend-OFL.txt",
+      "bytes": 4314,
+      "sha256": "18aabf190848725e2576eefb5c29ba06aac1029d02132252a7f312eac2e50cf3"
+    },
+    {
+      "file": "fonts/Charm-OFL.txt",
+      "bytes": 4314,
+      "sha256": "18aabf190848725e2576eefb5c29ba06aac1029d02132252a7f312eac2e50cf3"
+    }
+  ]
+}
