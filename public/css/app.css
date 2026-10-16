@@ -974,6 +974,7 @@ article.shift-card {
 .signup-form input[type="text"],
 .signup-form input[type="email"],
 .signup-form input[type="tel"],
+.signup-form input[type="search"],
 .signup-form input[type="date"],
 .signup-form input[type="time"],
 .signup-form input[type="number"],
@@ -1821,6 +1822,50 @@ button.btn-quiet::before {
 .desk-range label {
   flex: 1 1 14rem;
   max-width: 18rem;
+}
+
+.signup-form input[type='file'] {
+  font: inherit;
+  max-width: 100%;
+}
+
+.contact-list {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
+.contact-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1.2fr) minmax(12rem, 1.6fr) minmax(7rem, 0.8fr) auto;
+  gap: 0.35rem 1rem;
+  align-items: baseline;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--hope-border-2);
+}
+
+.contact-row p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.contact-row[hidden] {
+  display: none;
+}
+
+.contact-more {
+  margin: 0.35rem 0 0;
+}
+
+#add-shift {
+  border-radius: 1.25rem;
+  padding-right: 2.5rem;
+}
+
+@media (max-width: 42em) {
+  .contact-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Footer */

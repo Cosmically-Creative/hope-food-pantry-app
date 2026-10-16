@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { verifyTurnstile } from '../src/turnstile.js';
 import { createPostmarkMailer } from '../src/mail/postmark.js';
 import { createSesMailer } from '../src/mail/ses.js';
+import { createSmtp2GoMailer } from '../src/mail/smtp2go.js';
 
 const timeout = AbortSignal.timeout.bind(AbortSignal);
 afterEach(() => vi.restoreAllMocks());
@@ -45,6 +46,18 @@ describe('outbound request deadlines', () => {
       fetchImpl: async (_url, init) => Object.assign(new Response('{}'), {json:() => stalled(init?.signal)}),
     });
     expect(result).toEqual({ok:false, reason:'unavailable'});
+  });
+
+  it('marks an SMTP2GO timeout uncertain instead of retrying', async () => {
+    shortDeadline(15_000);
+    const driver = createSmtp2GoMailer('api-9f3a2c1e5b8d4f70a1b2c3d4e5f6', async (_url, init) => stalled(init?.signal));
+    expect((await driver.send(mail)).result).toBe('unknown');
+  });
+
+  it('marks a stalled SMTP2GO success body uncertain', async () => {
+    shortDeadline(15_000);
+    const driver = createSmtp2GoMailer('api-9f3a2c1e5b8d4f70a1b2c3d4e5f6', async (_url, init) => Object.assign(new Response('{}'), { json: () => stalled(init?.signal) }));
+    expect((await driver.send(mail)).result).toBe('unknown');
   });
 
   it('marks a Postmark timeout uncertain instead of retrying', async () => {

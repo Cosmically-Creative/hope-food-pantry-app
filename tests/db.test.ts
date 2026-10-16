@@ -44,6 +44,7 @@ describe('database startup', () => {
       expect(names).toEqual(
         [
           'audit',
+          'contacts',
           'coordinators',
           'events',
           'job_runs',

@@ -59,6 +59,13 @@ export function csvCell(value: string): string {
   return safe;
 }
 
+/** Drops the quote prefix csvCell adds, then trims. A name that merely starts with an apostrophe stays. */
+export function csvImportedCell(value: string): string {
+  let text = value.normalize('NFC');
+  if (text.startsWith("'") && FORMULA.test(text.slice(1))) text = text.slice(1);
+  return text.trim();
+}
+
 export function exportShiftRoster(db: Database.Database, shiftId: number): RosterExport | null {
   const shift = db.prepare('SELECT id FROM shifts WHERE id = ?').get(shiftId);
   if (!shift) return null;

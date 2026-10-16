@@ -1,5 +1,7 @@
 (function () {
   bindCalendar();
+  document.querySelectorAll('[data-contact]').forEach(bindContact);
+  document.querySelectorAll('[data-see-more]').forEach(bindSeeMore);
   var boxes = document.querySelectorAll('[data-under-18]');
   for (var i = 0; i < boxes.length; i += 1) bind(boxes[i]);
 
@@ -36,6 +38,41 @@
         detail.parentNode.appendChild(drawer);
       }
     }
+  }
+
+  function bindSeeMore(link) {
+    var list = document.getElementById('contacts-list');
+    if (!list) return;
+    var size = Number(link.getAttribute('data-see-more'));
+    if (!size || size < 1) size = 20;
+    link.addEventListener('click', function (event) {
+      var hidden = list.querySelectorAll('[data-contact-row][hidden]');
+      if (!hidden.length) return;
+      event.preventDefault();
+      var count = Math.min(size, hidden.length);
+      for (var i = 0; i < count; i += 1) hidden[i].hidden = false;
+      if (hidden.length <= count) {
+        var more = link.parentNode;
+        if (more && more.classList && more.classList.contains('contact-more')) more.hidden = true;
+        else link.hidden = true;
+      }
+    });
+  }
+
+  function bindContact(picker) {
+    picker.addEventListener('change', function () {
+      var form = picker.form;
+      var option = picker.options[picker.selectedIndex];
+      if (!form || !option || !option.value) return;
+      setField(form, 'name', option.getAttribute('data-name') || '');
+      setField(form, 'email', option.getAttribute('data-email') || '');
+      setField(form, 'phone', option.getAttribute('data-phone') || '');
+    });
+  }
+
+  function setField(form, name, value) {
+    var input = form.elements[name];
+    if (input && 'value' in input) input.value = value;
   }
 
   function bind(box) {

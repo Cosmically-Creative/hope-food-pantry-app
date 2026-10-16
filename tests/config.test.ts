@@ -55,8 +55,8 @@ describe('loadConfig', () => {
   it('accepts a production configuration with real-looking keys', () => {
     const config = loadConfig(productionEnv('/tmp/hope-data'));
     expect(config.secureCookies).toBe(true);
-    expect(config.mail.driver).toBe('postmark');
-    expect(config.mail.postmarkToken).toBe('pm-server-token-9f3a2c1e5b8d4f70');
+    expect(config.mail.driver).toBe('smtp2go');
+    expect(config.mail.smtp2goApiKey).toBe('api-9f3a2c1e5b8d4f70a1b2c3d4e5f6');
     expect(config.baseUrl).toBe('https://volunteer.example.org');
   });
 
@@ -79,6 +79,7 @@ describe('loadConfig', () => {
   });
 
   it('requires credentials for the selected mail driver', () => {
+    expect(() => loadConfig(devEnv({ MAIL_DRIVER: 'smtp2go', SMTP2GO_API_KEY: '' }))).toThrow(/SMTP2GO_API_KEY/);
     expect(() => loadConfig(devEnv({ MAIL_DRIVER: 'postmark', POSTMARK_TOKEN: '' }))).toThrow(/POSTMARK_TOKEN/);
     expect(() =>
       loadConfig(
@@ -119,6 +120,7 @@ describe('loadConfig', () => {
       MAIL_DRIVER: process.env.MAIL_DRIVER,
       MAIL_FROM: process.env.MAIL_FROM,
       MAIL_REPLY_TO: process.env.MAIL_REPLY_TO,
+      SMTP2GO_API_KEY: process.env.SMTP2GO_API_KEY ?? '',
       POSTMARK_TOKEN: process.env.POSTMARK_TOKEN ?? '',
       SES_REGION: process.env.SES_REGION ?? '',
       SES_ACCESS_KEY_ID: process.env.SES_ACCESS_KEY_ID ?? '',

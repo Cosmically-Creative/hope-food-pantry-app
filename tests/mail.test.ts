@@ -12,6 +12,7 @@ import { issueFormToken } from '../src/form-token.js';
 import { deliverDueMail } from '../src/mail/deliver.js';
 import { createPostmarkMailer } from '../src/mail/postmark.js';
 import { createSesMailer } from '../src/mail/ses.js';
+import { createSmtp2GoMailer } from '../src/mail/smtp2go.js';
 import { renderConfirmation } from '../src/mail/templates.js';
 import type { Mailer } from '../src/mail/types.js';
 import { reserveSignup, type ReserveInput } from '../src/signup.js';
@@ -200,6 +201,48 @@ describe('transactional mail', () => {
 });
 
 describe('mail drivers', () => {
+  it('treats SMTP2GO acceptance, a rejected sender, and a lost connection differently', async () => {
+    const message = sample();
+    const accepted = createSmtp2GoMailer('api-9f3a2c1e5b8d4f70a1b2c3d4e5f6', async (url, init) => {
+      expect(String(url)).toBe('https://api.smtp2go.com/v3/email/send');
+      const headers = init?.headers as Record<string, string>;
+      expect(headers['X-Smtp2go-Api-Key']).toBe('api-9f3a2c1e5b8d4f70a1b2c3d4e5f6');
+      const body = JSON.parse(String(init?.body)) as {
+        sender: string;
+        to: string[];
+        custom_headers: { header: string; value: string }[];
+        fastaccept?: boolean;
+      };
+      expect(body.sender).toBe(message.from);
+      expect(body.to).toEqual([message.to]);
+      expect(body.fastaccept).toBeUndefined();
+      expect(body.custom_headers).toContainEqual({ header: 'Reply-To', value: message.replyTo });
+      expect(String(init?.body)).not.toContain('api-9f3a2c1e5b8d4f70a1b2c3d4e5f6');
+      return json({ data: { succeeded: 1, failed: 0, failures: [], email_id: 'smtp2go-1' } }, 200);
+    });
+    expect(await accepted.send(message)).toEqual({ result: 'sent', providerId: 'smtp2go-1' });
+
+    const rejected = createSmtp2GoMailer('api-9f3a2c1e5b8d4f70a1b2c3d4e5f6', async () => json({
+      data: { succeeded: 0, failed: 1, failures: ['From header sender domain not verified for pat@example.invalid'] },
+    }, 200));
+    const failed = await rejected.send(message);
+    expect(failed.result).toBe('failed');
+    if (failed.result === 'failed') expect(failed.error).not.toContain('pat@example.invalid');
+
+    const denied = createSmtp2GoMailer('api-9f3a2c1e5b8d4f70a1b2c3d4e5f6', async () => json({
+      data: { error: 'You do not have permission', error_code: 'E_ApiResponseCodes.ENDPOINT_PERMISSION_DENIED' },
+    }, 400));
+    expect((await denied.send(message)).result).toBe('failed');
+
+    const busy = createSmtp2GoMailer('api-9f3a2c1e5b8d4f70a1b2c3d4e5f6', async () => new Response('no', { status: 429 }));
+    expect((await busy.send(message)).result).toBe('retry');
+
+    const down = createSmtp2GoMailer('api-9f3a2c1e5b8d4f70a1b2c3d4e5f6', async () => {
+      throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+    });
+    expect((await down.send(message)).result).toBe('retry');
+  });
+
   it('treats Postmark acceptance, rejection, and a lost connection differently', async () => {
     const message = sample();
     const accepted = createPostmarkMailer('server-token-value', async (_url, init) => {

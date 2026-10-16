@@ -10,7 +10,7 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-**This is not ready for a public launch, and it is not ready for real volunteer records.** Phase 1A has public browsing, individual signup, cancellation, queued email, and coordinator sign-in for events, one-off shifts, rosters, and cancellation. A coordinator can add a walk-in, mark attendance, and move a signup from a shift roster. A volunteer can switch shifts from their private link. An active weekly template fills shifts for the next eight weeks. A coordinator can add, change, or end a weekly template, and can remove a cancelled person, a finished empty shift, an ended template, or an event that is off the public list and already empty. A confirmed signup can receive a reminder 48 hours before the shift and again 2 hours before, and can turn reminders off without cancelling. A coordinator can download a roster for one shift, one event, or a local date range. A coordinator can set the two reminder times, the reply-to address, how many months to keep a signup, and the wording on the privacy page. After 1:00 AM Central Time, signups older than that many months lose their name and contact details in this app. After 2:30 AM Central Time, the app saves a database backup on this computer. A container can run that same app on this computer, on port 3020, without opening it to the network. This is not a public launch. Around 1:00 AM in each event's time zone, the app adds any missing weekly shifts for the next eight weeks, once that local day. Development prints mail in the server log. It does not send real email.
+**This is not ready for a public launch, and it is not ready for real volunteer records.** Phase 1A has public browsing, individual signup, cancellation, queued email, and coordinator sign-in for events, one-off shifts, rosters, and cancellation. A coordinator can add a walk-in, mark attendance, and move a signup from a shift roster. A volunteer can switch shifts from their private link. An active weekly template fills shifts for the next eight weeks. A coordinator can add, change, or end a weekly template, and can remove a cancelled person, a finished empty shift, an ended template, or an event that is off the public list and already empty. A confirmed signup can receive a reminder 48 hours before the shift and again 2 hours before, and can turn reminders off without cancelling. A coordinator can download a roster for one shift, one event, or a local date range. A coordinator can import a contact list, download it, use a saved contact when adding a walk-in, and add a saved contact to an open shift. A coordinator can set the two reminder times, the reply-to address, how many months to keep a signup, and the wording on the privacy page. After 1:00 AM Central Time, signups older than that many months lose their name and contact details in this app. After 2:30 AM Central Time, the app saves a database backup on this computer. A container can run that same app on this computer, on port 3020, without opening it to the network. This is not a public launch. Around 1:00 AM in each event's time zone, the app adds any missing weekly shifts for the next eight weeks, once that local day. Development prints mail in the server log. It does not send real email.
 
 ## Current step
 
@@ -32,6 +32,7 @@ You should have received a copy of the GNU General Public License along with thi
 | Remove a cancelled person, a finished shift, an ended template, or an empty hidden event | Done |
 | Reminder emails, 48 hours and 2 hours, with a way to stop them | Done |
 | Download a roster for a shift, an event, or a date range | Done |
+| Import and download a contact list | Done |
 | Set reminder times, reply-to, privacy wording, and retention months | Done |
 | Refill weekly shifts around 1:00 AM in each event time zone | Done |
 | Remove personal details after the saved retention period | Done |
@@ -44,7 +45,7 @@ The core tables for later steps are already in `migrations/001_init.sql`. Behavi
 
 Do not treat this repository as an approved privacy policy or an approved operating setup.
 
-- [ ] **D1.** The pantry chooses the email provider and verifies the sender and reply-to.
+- [ ] **D1.** SMTP2GO is the email provider. The pantry verifies the sender and the reply-to.
 - [ ] **D2.** Whether a group signup is essential. A shared email can already sign up more than one person on the same shift. Each person takes one spot and gets their own confirmation and private link. The same person, matched by name and email, cannot take a second spot on that shift. `group_size` stays 1. Group signup still needs its own decision: who the reservation is for, how minors work, what happens when the count changes, and who receives mail.
 - [ ] **D3.** The pantry approves privacy wording, minor and guardian requirements, and retention periods, including copies and exports.
 - [ ] **D4.** The pantry confirms the coordinator list, who owns the administrator account, and the recovery contact.
@@ -53,7 +54,7 @@ Do not treat this repository as an approved privacy policy or an approved operat
 
 ## TODO(Phase 2)
 
-SignUpGenius importer. Do not build this until an actual export file and the duplicate-handling rules are known.
+SignUpGenius shift import. The people export is a contact list, and that list can be imported. A shift import still needs an export that includes the slot, date, and time, plus a rule for someone who is already signed up for that shift.
 
 Password login, waitlists, volunteer accounts, SMS, analytics, and payments are out of scope.
 
@@ -74,7 +75,7 @@ Open `/` for the weekly pantry schedule. `/e/weekly-pantry` is the same seeded e
 
 An open shift has a signup form. It asks for one person. Another person can use the same email and takes another spot. The same person cannot take a second spot. It asks for a parent or guardian when the volunteer is under 18. The form needs JavaScript because of the Turnstile check. Wait a few seconds after the page loads before submitting. The confirmation page shows a private link and says a confirmation email is queued. That page works without JavaScript. Cancel this signup there to open the spot again. A cancellation email is queued, and a confirmation that has not been sent yet is dropped. That person can sign up again once the cancellation is saved. Someone else can use the email while the first signup is still confirmed. A cancelled signup stays on that private page until the link expires. A private link controls only that signup. Use the separate link for each signup.
 
-With `MAIL_DRIVER=console`, the development server tries to send queued mail every 30 seconds and prints each accepted message in its terminal. That is not delivery to a real inbox. `sent` means the driver accepted the message. A lost result is marked uncertain and is not sent again. Postmark and SES are implemented and stay unselected until the pantry chooses a provider.
+With `MAIL_DRIVER=console`, the development server tries to send queued mail every 30 seconds and prints each accepted message in its terminal. That is not delivery to a real inbox. `sent` means the driver accepted the message. A lost result is marked uncertain and is not sent again. SMTP2GO is the mail provider. Set `MAIL_DRIVER=smtp2go` and `SMTP2GO_API_KEY` to send through it. Postmark and SES remain available.
 
 Coordinator sign-in is at `/login`. The first time the app starts with an empty coordinators table, it creates one administrator from `BOOTSTRAP_ADMIN_EMAIL`. The name on that account is Administrator. It does not create another account on later starts, and it does not change an account that is already there. Sign-in emails a link that expires in 15 minutes and works once. Opening the link does not sign you in. Use the button on that page. The link is printed in the development server log with the rest of the mail. There is no password.
 
@@ -102,11 +103,13 @@ A reminder is queued at each saved time before a confirmed signup, while the shi
 
 **Download this roster**, on a shift, and **Download this event**, on an event, save a spreadsheet of the signups. **Download this date range**, on the coordinator page, uses each event's local shift date. The file includes cancelled signups and attendance. A cell that would be a spreadsheet formula is saved as text. The download is not cached. A copy on a coordinator's computer is outside this app, and the app does not delete it later.
 
+**Contacts**, on the coordinator page, keeps a list of people. Saving someone there does not sign them up for a shift. **Import this list** reads a spreadsheet with First Name, Last Name, Email, and Phone, including the SignUpGenius people export. An Address column is ignored. The same email updates that person. A different email stays a separate person, even when the name matches. A blank phone does not erase a phone already saved. Email addresses are stored in lowercase. Importing does not take a spot and does not send email. **Download contacts** saves that list. A cell that would be a spreadsheet formula is saved as text. A downloaded copy stays on the coordinator's computer. The signup retention job does not clear this list. The list is the contacts table in `app.db`. The list shows 20 people. **See more** shows the next 20 on this page, without returning to the top, and keeps a search. **Choose a name**, then choose the shift from **Shift**. That takes one spot and queues a confirmation email. A full, cancelled, or ended shift is not in that list, and a shift they are already on is not in that list. A shift that is not on the public list can still be chosen. **Remove** deletes that person from the list only. On an open shift, **Saved contact** fills a walk-in. The walk-in still takes one spot and queues a confirmation email. Typing a walk-in who is not on the list does not add them to it.
+
 **Settings**, on the coordinator page, saves the two reminder times, the reply-to address, the privacy-page wording, and how many months to keep a signup after the shift ends. The defaults are 48 hours, 2 hours, the reply-to address from the server configuration, a blank privacy notice, and 24 months. The two reminder times have to be different whole hours from 1 to 336. The month count is a whole number from 1 to 120. A blank privacy notice leaves the public page saying a notice is not approved yet. Saved wording is shown on `/privacy` as written. Saving it does not by itself make that wording an approved privacy policy. New mail uses the saved reply-to address. Mail already queued keeps the address it was given. The sending address stays in the server configuration.
 
 Around 1:00 AM in an event's time zone, the app adds any missing shifts from that event's active weekly templates. It does this once for that local date. If 1:00 happens twice when the clocks change, the second hour does not add them again. If 1:00 does not exist that day, the fill runs once the local clock is past 1:00. A restart later that day still fills the date if it was missed. A date that already has a shift, including a cancelled one, stays as it is. Starting the app, and **Add weekly shifts**, still fill the schedule as well.
 
-After 1:00 AM Central Time, once that local date, the app removes the name, email, phone, guardian, notes, and private link from each signup whose shift ended more than the saved number of months ago. The default is 24. The shift, the signup status, and attendance stay, so the count remains. The minor answer is cleared. A spreadsheet downloaded from an old shift leaves those personal cells blank. This changes the live database. It does not change a spreadsheet already on a coordinator's computer, a message already in someone's inbox, or an older database backup. Clearing a value does not promise that the old bytes are immediately gone from the disk.
+After 1:00 AM Central Time, once that local date, the app removes the name, email, phone, guardian, notes, and private link from each signup whose shift ended more than the saved number of months ago. The default is 24. The shift, the signup status, and attendance stay, so the count remains. The minor answer is cleared. A spreadsheet downloaded from an old shift leaves those personal cells blank. This changes the live database. It does not change a spreadsheet already on a coordinator's computer, a message already in someone's inbox, or an older database backup. Clearing a value does not promise that the old bytes are immediately gone from the disk. The contact list is separate. Clearing an old signup does not remove that person from the contact list.
 
 Finished mail loses its recipient, subject, and body 30 days after it was sent, cancelled, or given up on. Mail that is still waiting after 30 days is cancelled and cleared, so it is not sent late. Mail for a signup is cleared in the same cleanup that removes that signup's details. A sign-in message is cleared once its link is used or expired. Every hour, the app clears those sign-in messages, finished mail past 30 days, expired sign-in sessions, used or expired sign-in links, and rate-limit counters older than about two days. Audit notes older than 24 months are deleted. Those notes are counts and ids. Starting the app runs this cleanup before it accepts requests. If 1:00 AM happens twice when the clocks change, the second hour does not run it again. A restart after 1:00 AM still runs it when that date was missed.
 
@@ -130,10 +133,10 @@ Production startup rejects:
 - `http://` or a local hostname in `BASE_URL`
 - Cloudflare's documented Turnstile test keys
 - `MAIL_DRIVER=console`
-- missing credentials for Postmark or SES when that driver is selected
+- missing credentials for SMTP2GO, Postmark, or SES when that driver is selected
 - a session secret shorter than 32 characters, a placeholder, or a secret that does not look random
 
-Development may use the console driver and the always-pass Turnstile test keys in `.env.example`. Those keys are not a launch setting. The console driver prints mail in the development server log and does not contact a provider. Choosing Postmark or SES is a separate decision, and this copy of the app must not send real mail until that is configured on purpose.
+Development may use the console driver and the always-pass Turnstile test keys in `.env.example`. Those keys are not a launch setting. The console driver prints mail in the development server log and does not contact a provider. SMTP2GO is the provider for real mail. This copy of the app must not send real mail until `SMTP2GO_API_KEY` and a verified sender are configured on purpose.
 
 `DATA_DIR` defaults to `/data`. Local development uses `./data`. The database file is `app.db` inside that directory.
 
@@ -184,7 +187,7 @@ sudo chown 1000:1000 data
 sudo chmod 700 data
 ```
 
-Copy `.env.production.example` to `.env` on the server and fill in the mail provider, Turnstile keys, public `https` address, and session secret. Protect the filled `.env` with `chmod 600 .env`. Then:
+Copy `.env.production.example` to `.env` on the server and fill in the SMTP2GO API key, Turnstile keys, public `https` address, and session secret. Protect the filled `.env` with `chmod 600 .env`. Then:
 
 ```bash
 docker compose up -d
@@ -194,7 +197,7 @@ docker compose up -d
 
 When Caddy is on the host and the app is in a container, `TRUST_PROXY` is the Compose subnet, not `loopback`. `compose.yaml` pins the network to `172.30.0.0/24` and sets `TRUST_PROXY=172.30.0.0/24`. Under Docker the peer is the gateway, `172.30.0.1`. Under rootless Podman 5 with pasta, the port forwarder connects from the container's own address on that network, such as `172.30.0.2`. Trusting the subnet covers both. Only this service is on that network, and the port is published on `127.0.0.1` only. Do not attach other containers to it. If that subnet is already used on the host, change the subnet, gateway, and `TRUST_PROXY` together. Check it once on the real host: send requests through Caddy from two clients and confirm one is not limited by the other's attempts. The Caddy snippets below stay on the host. They are not started by Compose. HTTPS ends at Caddy. The container does not obtain a certificate.
 
-Gmail is not a mail driver. Production still expects Postmark or SES until that choice is built.
+Gmail is not a mail driver. Production expects SMTP2GO.
 
 ```caddy
 volunteer.example.org {
@@ -234,7 +237,7 @@ example.org {
 
 Every response has a Content Security Policy, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, and a `Permissions-Policy` that turns off camera, microphone, location, payment, and USB. When `BASE_URL` is https, responses also send `Strict-Transport-Security: max-age=31536000` for this host only. It does not use `includeSubDomains`, so other pantry subdomains are not affected.
 
-The app limits request bodies to 64 KiB before parsing. Caddy examples apply the same limit. Rejected origins and rate-limited signup/login requests do not parse and redisplay submitted fields. Turnstile has a 10-second deadline; Postmark and SES have 15-second deadlines. A mail timeout is an uncertain delivery, not an automatic resend. SES automatic retries are disabled to avoid duplicate sends after ambiguous failures.
+The app limits request bodies to 64 KiB before parsing. Caddy examples apply the same limit. Rejected origins and rate-limited signup/login requests do not parse and redisplay submitted fields. Turnstile has a 10-second deadline; SMTP2GO, Postmark, and SES have 15-second deadlines. A mail timeout is an uncertain delivery, not an automatic resend. SES automatic retries are disabled to avoid duplicate sends after ambiguous failures.
 
 Compose uses a read-only root filesystem, drops all capabilities, prevents privilege escalation, and limits the container to 512 MiB memory, one CPU, and 100 processes. `/data` remains writable and `/tmp` is a bounded temporary filesystem. Adjust resource limits using measured usage. The app runs as uid 1000. Local snapshots remain on the same disk and are not an offsite backup.
 
@@ -275,4 +278,4 @@ The command prints the coordinator id, not the address. It does not deactivate a
 
 ## What is still unverified
 
-Real inbox delivery, a production host, and a public launch. The container was checked on this computer with a temporary database, separate from the development database: it starts, the weekly page loads, `/healthz` answers, a path prefix is included in that health address, and a restart keeps the database. The development settings were refused. This computer does not have the Docker daemon running, so that check used Podman. It has not been deployed. Decision D6 is still open. The console driver only prints mail. Gmail is not connected. The privacy page is waiting on decision D3 and is not a privacy policy. A real Turnstile hostname check still needs the production keys from decision D5. Development uses Cloudflare's always-pass test keys. Those keys succeed with hostname `example.com` and no action, so the hostname and action checks apply to real keys. Coordinator sign-in is covered here with the console driver, not with a real inbox.
+Real inbox delivery, a production host, and a public launch. The container was checked on this computer with a temporary database, separate from the development database: it starts, the weekly page loads, `/healthz` answers, a path prefix is included in that health address, and a restart keeps the database. The development settings were refused. This computer does not have the Docker daemon running, so that check used Podman. It has not been deployed. Decision D6 is still open. The console driver only prints mail. SMTP2GO is the selected provider and is not connected on this computer yet. Gmail is not connected. The privacy page is waiting on decision D3 and is not a privacy policy. A real Turnstile hostname check still needs the production keys from decision D5. Development uses Cloudflare's always-pass test keys. Those keys succeed with hostname `example.com` and no action, so the hostname and action checks apply to real keys. Coordinator sign-in is covered here with the console driver, not with a real inbox.

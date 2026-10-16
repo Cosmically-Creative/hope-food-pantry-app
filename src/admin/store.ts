@@ -978,6 +978,49 @@ export function listMoveTargets(
   });
 }
 
+/** Open shifts a coordinator can add this person to. Full, cancelled, ended, and already-confirmed shifts are omitted. A shift that is not on the public list is still included. */
+export function listOpenShiftsForPerson(
+  db: Database.Database,
+  person: { email: string; name: string },
+  now: string,
+): MoveTarget[] {
+  const blocked = new Set(confirmedPersonShiftIds(db, person.email, person.name));
+  const rows = db
+    .prepare(
+      `SELECT s.id AS id, s.role AS role, s.starts_at_utc AS starts_at_utc, s.ends_at_utc AS ends_at_utc,
+              s.capacity AS capacity, e.title AS title, e.tz AS tz, e.published AS published,
+              COALESCE(SUM(CASE WHEN su.status = 'confirmed' THEN su.group_size ELSE 0 END), 0) AS occupied
+       FROM shifts s
+       JOIN events e ON e.id = s.event_id
+       LEFT JOIN signups su ON su.shift_id = s.id
+       WHERE s.cancelled = 0 AND s.ends_at_utc > ?
+       GROUP BY s.id
+       ORDER BY s.starts_at_utc, s.id`,
+    )
+    .all(now) as Array<{
+    id: number;
+    role: string;
+    starts_at_utc: string;
+    ends_at_utc: string;
+    capacity: number;
+    title: string;
+    tz: string;
+    published: number;
+    occupied: number;
+  }>;
+  return rows.flatMap((row) => {
+    if (blocked.has(row.id)) return [];
+    if (Number(row.occupied) >= Number(row.capacity)) return [];
+    const start = formatInstantInZone(row.starts_at_utc, row.tz);
+    const end = formatInstantInZone(row.ends_at_utc, row.tz);
+    const publicity = row.published === 1 ? '' : ' (not on the public list)';
+    return [{
+      id: row.id,
+      label: `${row.title}: ${row.role}, ${start.dateLabel}, ${start.timeLabel} to ${end.timeLabel} ${end.abbreviation}${publicity}`,
+    }];
+  });
+}
+
 export type MoveResult =
   | { ok: true; fromShiftId: number; toShiftId: number; newSignupId: number; replay: boolean; manageToken: string | null }
   | { ok: false; error: string; shiftId?: number };

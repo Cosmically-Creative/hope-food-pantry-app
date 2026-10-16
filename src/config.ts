@@ -45,7 +45,7 @@ export class ConfigError extends Error {
   }
 }
 
-export type MailDriver = 'console' | 'postmark' | 'ses';
+export type MailDriver = 'console' | 'smtp2go' | 'postmark' | 'ses';
 
 export type AppConfig = {
   nodeEnv: 'development' | 'test' | 'production';
@@ -61,6 +61,7 @@ export type AppConfig = {
     driver: MailDriver;
     from: string;
     replyTo: string;
+    smtp2goApiKey: string | null;
     postmarkToken: string | null;
     ses: { region: string; accessKeyId: string; secretAccessKey: string } | null;
   };
@@ -82,11 +83,12 @@ const schema = z.object({
   DATA_DIR: z.string().min(1, 'DATA_DIR is required.'),
   SESSION_SECRET: z.string().min(32, 'SESSION_SECRET must be at least 32 characters.'),
   DEFAULT_TZ: z.string().min(1, 'DEFAULT_TZ is required.'),
-  MAIL_DRIVER: z.enum(['console', 'postmark', 'ses'], {
-    errorMap: () => ({ message: 'MAIL_DRIVER must be console, postmark, or ses.' }),
+  MAIL_DRIVER: z.enum(['console', 'smtp2go', 'postmark', 'ses'], {
+    errorMap: () => ({ message: 'MAIL_DRIVER must be console, smtp2go, postmark, or ses.' }),
   }),
   MAIL_FROM: z.string().min(1, 'MAIL_FROM is required.'),
   MAIL_REPLY_TO: z.string().min(1, 'MAIL_REPLY_TO is required.'),
+  SMTP2GO_API_KEY: z.string(),
   POSTMARK_TOKEN: z.string(),
   SES_REGION: z.string(),
   SES_ACCESS_KEY_ID: z.string(),
@@ -119,6 +121,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     MAIL_DRIVER: blank(env.MAIL_DRIVER),
     MAIL_FROM: blank(env.MAIL_FROM),
     MAIL_REPLY_TO: blank(env.MAIL_REPLY_TO),
+    SMTP2GO_API_KEY: (env.SMTP2GO_API_KEY ?? '').trim(),
     POSTMARK_TOKEN: (env.POSTMARK_TOKEN ?? '').trim(),
     SES_REGION: (env.SES_REGION ?? '').trim(),
     SES_ACCESS_KEY_ID: (env.SES_ACCESS_KEY_ID ?? '').trim(),
@@ -199,6 +202,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       driver: input.MAIL_DRIVER,
       from,
       replyTo,
+      smtp2goApiKey: mail.smtp2goApiKey,
       postmarkToken: mail.postmarkToken,
       ses: mail.ses,
     },
@@ -316,15 +320,20 @@ function parseReplyTo(value: string, problems: string[]): string | null {
 function resolveMail(
   input: z.infer<typeof schema>,
   problems: string[],
-): { postmarkToken: string | null; ses: AppConfig['mail']['ses'] } | null {
-  // TODO(D1): The pantry chooses the provider and verifies the sender and reply-to before real mail is enabled.
+): { smtp2goApiKey: string | null; postmarkToken: string | null; ses: AppConfig['mail']['ses'] } | null {
+  // TODO(D1): SMTP2GO is the provider. Verify the sender and reply-to before real mail is enabled.
   if (input.NODE_ENV === 'production' && input.MAIL_DRIVER === 'console') {
-    problems.push('MAIL_DRIVER=console is only for development. Choose postmark or ses after the pantry confirms the email provider.');
+    problems.push('MAIL_DRIVER=console is only for development. Use smtp2go after the sender address is verified with SMTP2GO.');
+  }
+  if (input.MAIL_DRIVER === 'smtp2go') {
+    const apiKey = requireCredential(input.SMTP2GO_API_KEY, 'SMTP2GO_API_KEY', problems);
+    if (!apiKey) return null;
+    return { smtp2goApiKey: apiKey, postmarkToken: null, ses: null };
   }
   if (input.MAIL_DRIVER === 'postmark') {
     const token = requireCredential(input.POSTMARK_TOKEN, 'POSTMARK_TOKEN', problems);
     if (!token) return null;
-    return { postmarkToken: token, ses: null };
+    return { smtp2goApiKey: null, postmarkToken: token, ses: null };
   }
   if (input.MAIL_DRIVER === 'ses') {
     if (!/^[a-z]{2}-[a-z]+-\d+$/.test(input.SES_REGION)) {
@@ -334,11 +343,12 @@ function resolveMail(
     const secretAccessKey = requireCredential(input.SES_SECRET_ACCESS_KEY, 'SES_SECRET_ACCESS_KEY', problems);
     if (!accessKeyId || !secretAccessKey || !/^[a-z]{2}-[a-z]+-\d+$/.test(input.SES_REGION)) return null;
     return {
+      smtp2goApiKey: null,
       postmarkToken: null,
       ses: { region: input.SES_REGION, accessKeyId, secretAccessKey },
     };
   }
-  return { postmarkToken: null, ses: null };
+  return { smtp2goApiKey: null, postmarkToken: null, ses: null };
 }
 
 function requireCredential(value: string, label: string, problems: string[]): string | null {

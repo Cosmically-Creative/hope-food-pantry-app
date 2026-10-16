@@ -4,6 +4,7 @@ import { spotsSentence } from './schedule.js';
 import type { EventValues, ShiftValues, TemplateValues } from './admin/forms.js';
 import type { SettingsErrors, SettingsForm } from './settings.js';
 import type { AppConfig } from './config.js';
+import { CONTACT_LIST_PAGE, contactImportSentence, contactSkipSentence, type Contact, type ContactImportSummary } from './contacts.js';
 import type { SignupErrors, SignupValues } from './signup-form.js';
 import { addLocalDays, todayInZone } from './time.js';
 import { appPath } from './url.js';
@@ -13,6 +14,7 @@ export type WalkInState = {
   values: SignupValues;
   errors: SignupErrors;
   message?: string;
+  contactId?: string;
 };
 
 export type ConfirmPrompt = {
@@ -118,6 +120,15 @@ export function templateEndPrompt(template: { role: string; weekday: number; act
   return { title, body: TEMPLATE_END_BODY, submit: 'End this template' };
 }
 
+export function contactRemovalPrompt(contact: { name: string; email: string }): Omit<ConfirmPrompt, 'action'> {
+  return {
+    title: `Remove ${contact.name}`,
+    detail: contact.email,
+    body: 'This deletes their name, email, and phone from the contact list. It does not cancel a signup and it does not send email.',
+    submit: 'Remove this contact',
+  };
+}
+
 export function templateRemovalPrompt(
   template: { role: string; weekday: number; active: boolean },
   error?: string,
@@ -179,6 +190,9 @@ export function AdminHome(props: {
           <div class="desk-actions">
             <a class="btn" href={appPath(props.config, '/admin/events/new')} data-open-event>
               New event
+            </a>
+            <a class="btn btn-quiet" href={appPath(props.config, '/admin/contacts')}>
+              Contacts
             </a>
             <a class="btn btn-quiet" href={appPath(props.config, '/admin/settings')}>
               Settings
@@ -280,6 +294,197 @@ export function SettingsPage(props: {
         </label>
         <button type="submit">Save settings</button>
       </form>
+    </>
+  );
+}
+
+function contactListHref(config: AppConfig, query: string, shown: number): string {
+  const params = new URLSearchParams();
+  if (query) params.set('q', query);
+  params.set('shown', String(shown));
+  return `${appPath(config, '/admin/contacts')}?${params.toString()}#contact-more`;
+}
+
+export function ContactsPage(props: {
+  config: AppConfig;
+  csrf: string;
+  people: Contact[];
+  total: number;
+  query: string;
+  limit: number;
+  notice?: string;
+  summary?: ContactImportSummary;
+  importError?: string;
+  confirm?: ConfirmPrompt;
+}) {
+  const heading =
+    props.total === 0
+      ? 'Saved contacts'
+      : props.query
+        ? `${props.people.length} of ${props.total}`
+        : props.total === 1
+          ? '1 person'
+          : `${props.total} people`;
+  const hiddenSkips = props.summary ? Math.max(0, props.summary.skipped - props.summary.skips.length) : 0;
+  const moreHref = contactListHref(props.config, props.query, props.limit + CONTACT_LIST_PAGE);
+  return (
+    <>
+      <p>
+        <a href={appPath(props.config, '/admin')}>Coordinator</a>
+      </p>
+      <h1>Contacts</h1>
+      {props.summary ? <Notice text={contactImportSentence(props.summary)} /> : <Notice notice={props.notice} />}
+      {props.summary && props.summary.skips.length > 0 ? (
+        <ul>
+          {props.summary.skips.map((skip) => (
+            <li key={skip.line}>{contactSkipSentence(skip)}</li>
+          ))}
+        </ul>
+      ) : null}
+      {hiddenSkips > 0 ? <p class="panel-note">{hiddenSkips === 1 ? '1 more row was skipped.' : `${hiddenSkips} more rows were skipped.`}</p> : null}
+      <p>
+        Saving someone here does not sign them up for a shift. Importing this list does not take a spot and does not send email. Choose a name to add that person to an open shift. Old signups lose their details after the retention period. This list stays until you remove someone.
+      </p>
+      <form method="post" action={appPath(props.config, '/admin/contacts/import')} class="signup-form desk-download" enctype="multipart/form-data">
+        <input type="hidden" name="csrf" value={props.csrf} />
+        <h2>Import a contact list</h2>
+        <p>
+          Use a spreadsheet with First Name, Last Name, Email, and Phone. The SignUpGenius people export works. Address is ignored. The same email updates that person. A different email stays a separate person, even when the name matches. A blank phone does not erase a phone already saved. Email addresses are stored in lowercase. The file has to be under 64 KB.
+        </p>
+        {props.importError ? <p class="error">{props.importError}</p> : null}
+        <label>
+          Spreadsheet
+          <input name="file" type="file" accept=".csv,text/csv,text/plain" required />
+        </label>
+        <button type="submit">Import this list</button>
+      </form>
+      <form method="post" action={appPath(props.config, '/admin/contacts/export')} class="signup-form desk-download">
+        <input type="hidden" name="csrf" value={props.csrf} />
+        <h2>Download contacts</h2>
+        <p>A downloaded copy stays on your computer. This app does not delete it later. The Address column is blank. A cell that would be a spreadsheet formula is saved as text.</p>
+        <button type="submit">Download contacts</button>
+      </form>
+      <section class="desk-events" aria-labelledby="contacts-heading">
+        <h2 id="contacts-heading">{heading}</h2>
+        {props.total > 0 ? (
+          <form method="get" action={appPath(props.config, '/admin/contacts')} class="signup-form desk-download">
+            <div class="desk-range">
+              <label>
+                Find
+                <input name="q" type="search" value={props.query} />
+              </label>
+              <button type="submit">Find</button>
+            </div>
+          </form>
+        ) : (
+          <p class="empty">No contacts yet.</p>
+        )}
+        {props.total > 0 && props.people.length === 0 ? <p class="empty">No contacts match.</p> : null}
+        {props.people.length > 0 ? (
+          <ul class="contact-list" id="contacts-list">
+            {props.people.map((person, index) => (
+              <li class="contact-row" data-contact-row="1" hidden={index >= props.limit ? true : undefined} key={person.id}>
+                <p class="contact-name">
+                  <strong>
+                    <a href={appPath(props.config, `/admin/contacts/${person.id}`)}>{person.name}</a>
+                  </strong>
+                </p>
+                <p class="contact-email">{person.email}</p>
+                <p class="contact-phone">{person.phone ?? ''}</p>
+                <p class="contact-remove">
+                  <ConfirmAnchor href={appPath(props.config, `/admin/contacts/${person.id}/remove`)} prompt={contactRemovalPrompt(person)}>
+                    Remove
+                  </ConfirmAnchor>
+                </p>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {props.people.length > props.limit ? (
+          <p class="contact-more" id="contact-more">
+            <a class="btn btn-quiet" href={moreHref} data-see-more={String(CONTACT_LIST_PAGE)}>
+              See more
+            </a>
+          </p>
+        ) : null}
+      </section>
+      <ConfirmDialog config={props.config} csrf={props.csrf} prompt={props.confirm} />
+    </>
+  );
+}
+
+export function ContactPage(props: {
+  config: AppConfig;
+  csrf: string;
+  contact: Contact;
+  shifts: MoveTarget[];
+  form: WalkInState;
+  shiftId: string;
+  error?: string;
+}) {
+  const values = props.form.values;
+  const errors = props.form.errors;
+  const errorEntries = Object.entries(errors).filter((entry): entry is [string, string] => Boolean(entry[1]));
+  return (
+    <>
+      <p>
+        <a href={appPath(props.config, '/admin/contacts')}>Contacts</a>
+      </p>
+      <h1>{props.contact.name}</h1>
+      <p>{props.contact.email}</p>
+      {props.contact.phone ? <p>{props.contact.phone}</p> : null}
+      {props.error ? <p class="error">{props.error}</p> : null}
+      <h2>Add to a shift</h2>
+      <p>Choose an open shift. This uses their saved name, email, and phone. It takes one spot and queues a confirmation email. Their name stays off the public list. Full, cancelled, and ended shifts are left off this list, and so is a shift they are already on.</p>
+      {props.shifts.length > 0 ? (
+        <form method="post" action={appPath(props.config, `/admin/contacts/${props.contact.id}/add`)} class="signup-form">
+          {props.form.message ? <p class="error">{props.form.message}</p> : null}
+          {errorEntries.length > 0 ? (
+            <div class="error" role="alert">
+              <p>Check these fields:</p>
+              <ul>
+                {errorEntries.map(([field, message]) => (
+                  <li key={field}>{message}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <input type="hidden" name="csrf" value={props.csrf} />
+          <input type="hidden" name="form_token" value={props.form.token} />
+          <label for="add-shift">
+            Shift
+            <select id="add-shift" name="shift" required>
+              <option value="" selected={props.shiftId === '' ? true : undefined}>
+                Choose a shift
+              </option>
+              {props.shifts.map((shift) => (
+                <option value={String(shift.id)} key={shift.id} selected={props.shiftId === String(shift.id) ? true : undefined}>
+                  {shift.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label for="add-notes">
+            Notes (optional)
+            <textarea id="add-notes" name="notes" aria-invalid={errors.notes ? 'true' : undefined}>
+              {values.notes}
+            </textarea>
+            {errors.notes ? <span class="field-error">{errors.notes}</span> : null}
+          </label>
+          <label class="check" for="add-under-18">
+            <input id="add-under-18" name="under18" type="checkbox" value="yes" data-under-18="" checked={values.under18 ? true : undefined} />
+            They are under 18
+          </label>
+          <fieldset data-guardian="">
+            <legend>Parent or guardian</legend>
+            <WalkInField id="add-guardianName" label="Guardian name" name="guardianName" type="text" value={values.guardianName} error={errors.guardianName} />
+            <WalkInField id="add-guardianEmail" label="Guardian email" name="guardianEmail" type="email" value={values.guardianEmail} error={errors.guardianEmail} />
+          </fieldset>
+          <button type="submit">Add to this shift</button>
+        </form>
+      ) : (
+        <p class="empty">No open shift is available.</p>
+      )}
     </>
   );
 }
@@ -422,6 +627,7 @@ export function ShiftRoster(props: {
   error?: string;
   walkIn?: WalkInState;
   walkInNote?: string;
+  contacts?: Contact[];
   removable?: boolean;
   moves?: { targets: MoveTarget[]; tokens: Record<number, string> };
   confirm?: ConfirmPrompt;
@@ -489,7 +695,7 @@ export function ShiftRoster(props: {
       </section>
       {props.walkIn ? (
         <section class="desk-events" aria-labelledby="walkin-heading">
-          <WalkInForm config={props.config} csrf={props.csrf} shiftId={props.shift.id} form={props.walkIn} />
+          <WalkInForm config={props.config} csrf={props.csrf} shiftId={props.shift.id} form={props.walkIn} contacts={props.contacts ?? []} />
         </section>
       ) : props.walkInNote ? (
         <p class="panel-note">{props.walkInNote}</p>
@@ -1079,10 +1285,11 @@ function ShiftEditorForm(props: { config: AppConfig; csrf: string; shift: AdminS
   );
 }
 
-function WalkInForm(props: { config: AppConfig; csrf: string; shiftId: number; form: WalkInState }) {
+function WalkInForm(props: { config: AppConfig; csrf: string; shiftId: number; form: WalkInState; contacts: Contact[] }) {
   const values = props.form.values;
   const errors = props.form.errors;
   const errorEntries = Object.entries(errors).filter((entry): entry is [string, string] => Boolean(entry[1]));
+  const contactId = props.form.contactId ?? '';
   return (
     <form method="post" action={appPath(props.config, `/admin/shifts/${props.shiftId}/walk-in`)} class="signup-form event-details-form">
       <h2 id="walkin-heading">Add a walk-in</h2>
@@ -1102,6 +1309,31 @@ function WalkInForm(props: { config: AppConfig; csrf: string; shiftId: number; f
       ) : null}
       <input type="hidden" name="csrf" value={props.csrf} />
       <input type="hidden" name="form_token" value={props.form.token} />
+      {props.contacts.length > 0 ? (
+        <label for="walkin-contact">
+          Saved contact
+          <select id="walkin-contact" name="contact" data-contact="" aria-describedby="walkin-contact-hint">
+            <option value="" selected={contactId === '' ? true : undefined}>
+              Type their details
+            </option>
+            {props.contacts.map((person) => (
+              <option
+                value={String(person.id)}
+                key={person.id}
+                selected={contactId === String(person.id) ? true : undefined}
+                data-name={person.name}
+                data-email={person.email}
+                data-phone={person.phone ?? ''}
+              >
+                {person.name}, {person.email}
+              </option>
+            ))}
+          </select>
+          <span class="hint" id="walkin-contact-hint">
+            Optional. Choosing someone fills their name, email, and phone. A blank field uses the saved contact. Typing someone who is not on the list does not add them to it.
+          </span>
+        </label>
+      ) : null}
       <WalkInField id="walkin-name" label="Name" name="name" type="text" value={values.name} error={errors.name} />
       <WalkInField id="walkin-email" label="Email" name="email" type="email" value={values.email} error={errors.email} />
       <WalkInField id="walkin-phone" label="Phone (optional)" name="phone" type="tel" value={values.phone} error={errors.phone} hint="We will not text you" />
@@ -1142,7 +1374,6 @@ function WalkInField(props: { id: string; label: string; name: string; type: 'te
         name={props.name}
         type={props.type}
         value={props.value}
-        required={props.name === 'name' || props.name === 'email' ? true : undefined}
         autocomplete="off"
         aria-invalid={props.error ? 'true' : undefined}
         aria-describedby={describedBy}
@@ -1289,8 +1520,8 @@ function BackupNote(props: { text: string }) {
   );
 }
 
-function Notice(props: { notice?: string }) {
-  const text = props.notice ? NOTICES[props.notice] : undefined;
+function Notice(props: { notice?: string; text?: string }) {
+  const text = props.text ?? (props.notice ? NOTICES[props.notice] : undefined);
   if (!text) return null;
   return (
     <p class="notice" data-notice>
@@ -1359,6 +1590,7 @@ const NOTICES: Record<string, string> = {
   'template-removed': 'That weekly template is removed. Shifts already on the schedule stay, and they are no longer tied to the weekly pattern.',
   'event-removed': 'That event is removed.',
   'settings-saved': 'Settings saved.',
+  'contact-removed': 'That person is removed from the contact list.',
 };
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;

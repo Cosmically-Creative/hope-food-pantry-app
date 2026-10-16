@@ -38,6 +38,7 @@ import {
   readSignupRemoval,
   readTemplateRemoval,
   listMoveTargets,
+  listOpenShiftsForPerson,
   moveSignup,
   setAttendance,
   updateEvent,
@@ -59,6 +60,9 @@ import {
   templateEndPrompt,
   templateRemovalPrompt,
   type ConfirmPrompt,
+  contactRemovalPrompt,
+  ContactPage,
+  ContactsPage,
   SettingsPage,
   ShiftEditor,
   ShiftRoster,
@@ -73,6 +77,18 @@ import type { AppConfig } from './config.js';
 import { normalizeEmail } from './email.js';
 import type { MailIdentity } from './mail/types.js';
 import { issueFormToken, newOperationId, readFormToken } from './form-token.js';
+import {
+  contactListLimit,
+  exportContacts,
+  formatContactSkips,
+  getContact,
+  importContactCsv,
+  loadContacts,
+  parseContactSkips,
+  removeContact,
+  walkInFromContact,
+  type ContactImportSummary,
+} from './contacts.js';
 import { dateStamp, exportDateRange, exportEventRoster, exportShiftRoster } from './export.js';
 import { originAllowed } from './origin.js';
 import {
@@ -87,6 +103,7 @@ import {
 import { expandTemplates } from './recurrence.js';
 import { Layout } from './pages.js';
 import { EMPTY_SIGNUP, parseSignupForm, type SignupValues } from './signup-form.js';
+import { confirmedPersonOnShift } from './signup.js';
 import { recordInvalidLoginToken, recordLoginEmail, recordLoginIp } from './rate-limit.js';
 import { isBusy } from './sqlite-error.js';
 import { verifyTurnstile, type TurnstileCheck, type TurnstileVerdict } from './turnstile.js';
@@ -121,6 +138,13 @@ export function registerAdmin(app: Hono, services: AdminServices): void {
   app.get(appPath(config, '/admin/settings'), (c) => showSettings(c, services));
   app.post(appPath(config, '/admin/settings'), (c) => submitSettings(c, services));
   app.post(appPath(config, '/admin/export'), (c) => submitExportRange(c, services));
+  app.get(appPath(config, '/admin/contacts'), (c) => showContacts(c, services));
+  app.post(appPath(config, '/admin/contacts/import'), (c) => submitImportContacts(c, services));
+  app.post(appPath(config, '/admin/contacts/export'), (c) => submitExportContacts(c, services));
+  app.get(appPath(config, '/admin/contacts/:id/remove'), (c) => showRemoveContact(c, services));
+  app.post(appPath(config, '/admin/contacts/:id/remove'), (c) => submitRemoveContact(c, services));
+  app.post(appPath(config, '/admin/contacts/:id/add'), (c) => submitAddContactToShift(c, services));
+  app.get(appPath(config, '/admin/contacts/:id'), (c) => showContact(c, services));
   app.get(appPath(config, '/admin/events/new'), (c) => showNewEvent(c, services));
   app.post(appPath(config, '/admin/events'), (c) => submitNewEvent(c, services));
   app.get(appPath(config, '/admin/events/:id/remove'), (c) => showRemoveEvent(c, services));
@@ -314,6 +338,192 @@ async function submitExportShift(c: Context, services: AdminServices): Promise<R
   if (!exported) return missing(c, services);
   writeAudit(services.db, session.coordinatorId, 'roster.export', { shiftId, rows: exported.rows }, services.now());
   return csvDownload(c, `hope-shift-${shiftId}.csv`, exported.csv);
+}
+
+function showContacts(
+  c: Context,
+  services: AdminServices,
+  options?: { error?: string; status?: 200 | 400 | 403; confirm?: ConfirmPrompt },
+) {
+  const session = requireSession(c, services);
+  if (session instanceof Response) return session;
+  const loaded = loadContacts(services.db, c.req.query('q') ?? '');
+  return html(
+    c,
+    services,
+    'Contacts · Hope Volunteer',
+    <ContactsPage
+      config={services.config}
+      csrf={session.csrf}
+      people={loaded.people}
+      total={loaded.total}
+      query={loaded.query}
+      limit={contactListLimit(c.req.query('shown'))}
+      notice={options?.error ? undefined : knownNotice(c.req.query('notice'))}
+      summary={options?.error ? undefined : contactSummary(c)}
+      importError={options?.error}
+      confirm={options?.confirm}
+    />,
+    { account: session, status: options?.status ?? 200 },
+  );
+}
+
+async function submitImportContacts(c: Context, services: AdminServices): Promise<Response> {
+  const session = await postedSession(c, services);
+  if (session instanceof Response) return session;
+  const text = await csvFromField(session.body.file);
+  if (text === null) return showContacts(c, services, { error: 'Choose a spreadsheet to import.', status: 400 });
+  try {
+    const imported = importContactCsv(services.db, session.coordinatorId, text, services.now());
+    if (!imported.ok) return showContacts(c, services, { error: imported.error, status: 400 });
+    return c.redirect(importLocation(services.config, imported.result), 303);
+  } catch (err) {
+    return saveFailed(c, services, session, err);
+  }
+}
+
+async function submitExportContacts(c: Context, services: AdminServices): Promise<Response> {
+  const session = await postedSession(c, services);
+  if (session instanceof Response) return session;
+  const exported = exportContacts(services.db);
+  writeAudit(services.db, session.coordinatorId, 'contacts.export', { rows: exported.rows }, services.now());
+  return csvDownload(c, 'hope-contacts.csv', exported.csv);
+}
+
+function showRemoveContact(c: Context, services: AdminServices, error?: string, status: 200 | 400 | 403 = 200) {
+  const session = requireSession(c, services);
+  if (session instanceof Response) return session;
+  const contact = getContact(services.db, idFrom(c));
+  if (!contact) return missing(c, services);
+  const prompt = contactRemovalPrompt(contact);
+  return showContacts(c, services, {
+    status,
+    confirm: {
+      ...prompt,
+      body: error && error !== prompt.body ? error : prompt.body,
+      submit: error ? undefined : prompt.submit,
+      error: error && error !== prompt.body ? error : undefined,
+      action: appPath(services.config, `/admin/contacts/${contact.id}/remove`),
+    },
+  });
+}
+
+function showContact(
+  c: Context,
+  services: AdminServices,
+  state?: { error?: string; status?: 200 | 400; form?: WalkInState; shiftId?: string },
+) {
+  const session = requireSession(c, services);
+  if (session instanceof Response) return session;
+  const contact = getContact(services.db, idFrom(c));
+  if (!contact) return missing(c, services);
+  return html(
+    c,
+    services,
+    `${contact.name} · Hope Volunteer`,
+    <ContactPage
+      config={services.config}
+      csrf={session.csrf}
+      contact={contact}
+      shifts={listOpenShiftsForPerson(services.db, { email: contact.email, name: contact.name }, services.now())}
+      form={state?.form ?? blankWalkIn(services, contact.id)}
+      shiftId={state?.shiftId ?? ''}
+      error={state?.error}
+    />,
+    { account: session, status: state?.status ?? 200 },
+  );
+}
+
+function contactShiftUnavailable(c: Context, services: AdminServices, email: string, name: string, shiftId: number, form: WalkInState) {
+  const already = shiftId > 0 && confirmedPersonOnShift(services.db, shiftId, email, name);
+  return showContact(c, services, {
+    error: already ? 'That person is already signed up for this shift.' : 'That shift is not open.',
+    status: 400,
+    form,
+    shiftId: '',
+  });
+}
+
+async function submitAddContactToShift(c: Context, services: AdminServices): Promise<Response> {
+  const session = await postedSession(c, services);
+  if (session instanceof Response) return session;
+  const contact = getContact(services.db, idFrom(c));
+  if (!contact) return missing(c, services);
+  const shiftId = wholeId(textField(session.body, 'shift'));
+  const entered = signupValuesFrom(session.body);
+  const filled = walkInFromContact(contact, { ...entered, name: '', email: '', phone: '' });
+  const postedToken = textField(session.body, 'form_token');
+  if (shiftId === 0) {
+    return showContact(c, services, {
+      error: 'Choose a shift.',
+      status: 400,
+      form: blankWalkIn(services, contact.id, filled),
+      shiftId: '',
+    });
+  }
+  const shift = listOpenShiftsForPerson(services.db, { email: contact.email, name: contact.name }, services.now()).find(
+    (choice) => choice.id === shiftId,
+  );
+  if (!shift) return contactShiftUnavailable(c, services, contact.email, contact.name, shiftId, blankWalkIn(services, contact.id, filled));
+  // Bound to this contact. The shift is the Shift field, so one token covers every choice in the menu.
+  const token = readFormToken(services.config.sessionSecret, postedToken, contact.id, Date.parse(services.now()), 0);
+  if (!token.ok) {
+    return showContact(c, services, {
+      status: 400,
+      form: blankWalkIn(services, contact.id, filled, {}, 'This form is out of date. Submit it again.'),
+      shiftId: String(shiftId),
+    });
+  }
+  const parsed = parseSignupForm(filled, 'coordinator');
+  if (!parsed.ok) {
+    return showContact(c, services, {
+      status: 400,
+      form: blankWalkIn(services, contact.id, filled, parsed.errors),
+      shiftId: String(shiftId),
+    });
+  }
+  try {
+    const saved = addWalkIn(services.db, session.coordinatorId, {
+      shiftId,
+      name: parsed.draft.name,
+      email: parsed.draft.emailNorm,
+      phone: parsed.draft.phone,
+      notes: parsed.draft.notes,
+      isMinor: parsed.draft.isMinor,
+      guardianName: parsed.draft.guardianName,
+      guardianEmail: parsed.draft.guardianEmail,
+      operationId: token.claims.operationId,
+      now: services.now(),
+      mail: mailIdentity(services.db, services.config),
+    });
+    if (saved.ok) return c.redirect(appPath(services.config, `/admin/shifts/${shiftId}?notice=walk-in`), 303);
+    if (saved.reason === 'duplicate') {
+      return showContact(c, services, { error: 'That person is already signed up for this shift.', status: 400 });
+    }
+    if (saved.reason === 'not_found' || saved.reason === 'closed' || saved.reason === 'full') {
+      return showContact(c, services, { error: 'That shift is not open.', status: 400 });
+    }
+    return showContact(c, services, {
+      status: 400,
+      form: blankWalkIn(services, contact.id, filled, {}, 'This form was already used for a different signup. Submit it again.'),
+      shiftId: String(shiftId),
+    });
+  } catch (err) {
+    return saveFailed(c, services, session, err);
+  }
+}
+
+async function submitRemoveContact(c: Context, services: AdminServices): Promise<Response> {
+  const session = await postedSession(c, services);
+  if (session instanceof Response) return session;
+  const id = idFrom(c);
+  try {
+    const removed = removeContact(services.db, session.coordinatorId, id, services.now());
+    if (!removed) return missing(c, services);
+    return c.redirect(appPath(services.config, '/admin/contacts?notice=contact-removed'), 303);
+  } catch (err) {
+    return saveFailed(c, services, session, err);
+  }
 }
 
 function csvDownload(c: Context, filename: string, csv: string): Response {
@@ -870,6 +1080,7 @@ function showShift(
   const now = services.now();
   const ended = !shift.cancelled && shift.endsAtUtc <= now;
   const full = !ended && !shift.cancelled && shift.occupied >= shift.capacity;
+  const showWalkIn = !shift.cancelled && !ended && !full;
   const walkInNote = ended ? 'This shift has ended.' : full ? 'This shift is full.' : undefined;
   const confirmed = shift.people.some((person) => person.status === 'confirmed');
   const targets = confirmed ? listMoveTargets(services.db, shift.eventId, shift.id, now) : [];
@@ -895,8 +1106,9 @@ function showShift(
       removable={shift.cancelled || shift.endsAtUtc <= now}
       notice={knownNotice(c.req.query('notice'))}
       error={error}
-      walkIn={!shift.cancelled && !ended && !full ? (walkIn ?? blankWalkIn(services, shift.id)) : undefined}
+      walkIn={showWalkIn ? (walkIn ?? blankWalkIn(services, shift.id)) : undefined}
       walkInNote={walkInNote}
+      contacts={showWalkIn ? loadContacts(services.db, '').people : []}
       moves={confirmed ? { targets, tokens } : undefined}
       confirm={confirm}
     />,
@@ -910,19 +1122,25 @@ async function submitWalkIn(c: Context, services: AdminServices): Promise<Respon
   const id = idFrom(c);
   const shift = getAdminShift(services.db, id);
   if (!shift) return missing(c, services);
-  const values = signupValuesFrom(session.body);
+  const contactId = textField(session.body, 'contact').trim();
+  const entered = signupValuesFrom(session.body);
   if (shift.cancelled || shift.endsAtUtc <= services.now()) return showShift(c, services, undefined, 400);
   if (shift.occupied >= shift.capacity) return showShift(c, services, undefined, 400);
   const token = readFormToken(services.config.sessionSecret, textField(session.body, 'form_token'), id, Date.parse(services.now()), 0);
   if (!token.ok) {
-    return showShift(c, services, undefined, 400, blankWalkIn(services, id, values, {}, 'This form is out of date. Submit it again.'));
+    return showShift(c, services, undefined, 400, blankWalkIn(services, id, entered, {}, 'This form is out of date. Submit it again.', contactId));
   }
-  const parsed = parseSignupForm(values, 'coordinator');
+  const filled = applySavedContact(services.db, contactId, entered);
+  if (!filled.ok) {
+    return showShift(c, services, undefined, 400, blankWalkIn(services, id, entered, {}, 'That saved contact is not available.', contactId));
+  }
+  const parsed = parseSignupForm(filled.values, 'coordinator');
   if (!parsed.ok) {
     return showShift(c, services, undefined, 400, {
       token: textField(session.body, 'form_token'),
-      values,
+      values: filled.values,
       errors: parsed.errors,
+      contactId,
     });
   }
   try {
@@ -945,8 +1163,9 @@ async function submitWalkIn(c: Context, services: AdminServices): Promise<Respon
     if (saved.reason === 'duplicate') {
       return showShift(c, services, undefined, 400, {
         token: textField(session.body, 'form_token'),
-        values,
+        values: filled.values,
         errors: { email: 'That person is already signed up for this shift.' },
+        contactId,
       });
     }
     return showShift(
@@ -954,7 +1173,7 @@ async function submitWalkIn(c: Context, services: AdminServices): Promise<Respon
       services,
       undefined,
       400,
-      blankWalkIn(services, id, values, {}, 'This form was already used for a different signup. Submit it again.'),
+      blankWalkIn(services, id, filled.values, {}, 'This form was already used for a different signup. Submit it again.', contactId),
     );
   } catch (err) {
     return saveFailed(c, services, session, err);
@@ -1232,14 +1451,22 @@ function knownNotice(value: string | undefined): string | undefined {
     value === 'shifts-removed' ||
     value === 'template-removed' ||
     value === 'event-removed' ||
-    value === 'settings-saved'
+    value === 'settings-saved' ||
+    value === 'contact-removed'
   ) {
     return value;
   }
   return undefined;
 }
 
-function blankWalkIn(services: AdminServices, shiftId: number, values: SignupValues = EMPTY_SIGNUP, errors: WalkInState['errors'] = {}, message?: string): WalkInState {
+function blankWalkIn(
+  services: AdminServices,
+  shiftId: number,
+  values: SignupValues = EMPTY_SIGNUP,
+  errors: WalkInState['errors'] = {},
+  message?: string,
+  contactId = '',
+): WalkInState {
   return {
     token: issueFormToken(services.config.sessionSecret, {
       shiftId,
@@ -1249,6 +1476,7 @@ function blankWalkIn(services: AdminServices, shiftId: number, values: SignupVal
     values,
     errors,
     message,
+    contactId,
   };
 }
 
@@ -1272,6 +1500,12 @@ function idFrom(c: Context): number {
   return paramId(c, 'id');
 }
 
+function wholeId(value: string): number {
+  if (!/^[1-9][0-9]*$/.test(value)) return 0;
+  const id = Number(value);
+  return Number.isSafeInteger(id) ? id : 0;
+}
+
 function templateIdFrom(c: Context): number {
   return paramId(c, 'templateId');
 }
@@ -1286,6 +1520,57 @@ function paramId(c: Context, name: string): number {
 function textField(body: Record<string, unknown>, name: string): string {
   const value = body[name];
   return typeof value === 'string' ? value : '';
+}
+
+function applySavedContact(
+  db: Database.Database,
+  contactId: string,
+  values: SignupValues,
+): { ok: true; values: SignupValues } | { ok: false } {
+  if (contactId === '') return { ok: true, values };
+  if (!/^[1-9][0-9]*$/.test(contactId)) return { ok: false };
+  const id = Number(contactId);
+  if (!Number.isSafeInteger(id)) return { ok: false };
+  const contact = getContact(db, id);
+  if (!contact) return { ok: false };
+  return { ok: true, values: walkInFromContact(contact, values) };
+}
+
+function contactSummary(c: Context): ContactImportSummary | undefined {
+  if (c.req.query('notice') !== 'contacts-imported') return undefined;
+  const added = wholeNumber(c.req.query('added'));
+  const changed = wholeNumber(c.req.query('changed'));
+  const unchanged = wholeNumber(c.req.query('unchanged'));
+  const skipped = wholeNumber(c.req.query('skipped'));
+  if (added === null || changed === null || unchanged === null || skipped === null) return undefined;
+  return { added, changed, unchanged, skipped, skips: parseContactSkips(c.req.query('skip')) };
+}
+
+function wholeNumber(value: string | undefined): number | null {
+  if (value === undefined || value === '') return 0;
+  if (!/^\d{1,6}$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function importLocation(config: AppConfig, result: ContactImportSummary): string {
+  const params = new URLSearchParams({
+    notice: 'contacts-imported',
+    added: String(result.added),
+    changed: String(result.changed),
+    unchanged: String(result.unchanged),
+    skipped: String(result.skipped),
+  });
+  const skip = formatContactSkips(result.skips);
+  if (skip) params.set('skip', skip);
+  return appPath(config, `/admin/contacts?${params.toString()}`);
+}
+
+async function csvFromField(value: unknown): Promise<string | null> {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return csvFromField(value[0]);
+  if (typeof Blob !== 'undefined' && value instanceof Blob) return value.text();
+  return null;
 }
 
 function idList(body: Record<string, unknown>, name: string): number[] | null {
