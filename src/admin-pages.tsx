@@ -4,7 +4,15 @@ import { spotsSentence } from './schedule.js';
 import type { EventValues, ShiftValues, TemplateValues } from './admin/forms.js';
 import type { SettingsErrors, SettingsForm } from './settings.js';
 import type { AppConfig } from './config.js';
-import { CONTACT_LIST_PAGE, contactImportSentence, contactSkipSentence, type Contact, type ContactImportSummary } from './contacts.js';
+import {
+  CONTACT_LIST_PAGE,
+  contactImportSentence,
+  contactSkipSentence,
+  type Contact,
+  type ContactImportSummary,
+  type ContactManualErrors,
+  type ContactManualValues,
+} from './contacts.js';
 import type { SignupErrors, SignupValues } from './signup-form.js';
 import { addLocalDays, todayInZone } from './time.js';
 import { appPath } from './url.js';
@@ -315,8 +323,10 @@ export function ContactsPage(props: {
   notice?: string;
   summary?: ContactImportSummary;
   importError?: string;
+  manual?: { values: ContactManualValues; errors: ContactManualErrors };
   confirm?: ConfirmPrompt;
 }) {
+  const manual = props.manual ?? { values: { firstName: '', lastName: '', email: '', phone: '' }, errors: {} };
   const heading =
     props.total === 0
       ? 'Saved contacts'
@@ -343,13 +353,23 @@ export function ContactsPage(props: {
       ) : null}
       {hiddenSkips > 0 ? <p class="panel-note">{hiddenSkips === 1 ? '1 more row was skipped.' : `${hiddenSkips} more rows were skipped.`}</p> : null}
       <p>
-        Saving someone here does not sign them up for a shift. Importing this list does not take a spot and does not send email. Choose a name to add that person to an open shift. Old signups lose their details after the retention period. This list stays until you remove someone.
+        Someone who signs up is saved here. Cancelling that signup does not remove them. A different name is a separate contact, even when the email matches. To add someone who has not signed up, import a spreadsheet or save them below. That does not take a spot and does not send email. Choose a name to add that person to an open shift. Old signups lose their details after the retention period. This list stays until you remove someone.
       </p>
+      <form method="post" action={appPath(props.config, '/admin/contacts/new')} class="signup-form desk-download">
+        <input type="hidden" name="csrf" value={props.csrf} />
+        <h2>Add a contact</h2>
+        <p>This saves one person. It does not sign them up and does not send email. The same name and email updates that person. A different name is saved separately, even with the same email. A blank phone does not erase a phone already saved. Names are capitalized. A 10-digit phone is saved with dashes, like 712-555-0100.</p>
+        <WalkInField id="contact-first" label="First name" name="first_name" type="text" value={manual.values.firstName} error={manual.errors.firstName} />
+        <WalkInField id="contact-last" label="Last name" name="last_name" type="text" value={manual.values.lastName} error={manual.errors.lastName} />
+        <WalkInField id="contact-email" label="Email" name="email" type="email" value={manual.values.email} error={manual.errors.email} />
+        <WalkInField id="contact-phone" label="Phone (optional)" name="phone" type="tel" value={manual.values.phone} error={manual.errors.phone} hint="We will not text them" />
+        <button type="submit">Save this contact</button>
+      </form>
       <form method="post" action={appPath(props.config, '/admin/contacts/import')} class="signup-form desk-download" enctype="multipart/form-data">
         <input type="hidden" name="csrf" value={props.csrf} />
         <h2>Import a contact list</h2>
         <p>
-          Use a spreadsheet with First Name, Last Name, Email, and Phone. The SignUpGenius people export works. Address is ignored. The same email updates that person. A different email stays a separate person, even when the name matches. A blank phone does not erase a phone already saved. Email addresses are stored in lowercase. The file has to be under 64 KB.
+          Use a spreadsheet with First Name, Last Name, Email, and Phone. The SignUpGenius people export works. Address is ignored. The same name and email updates that person. A different name stays a separate person, even when the email matches. A different email stays a separate person, even when the name matches. A blank phone does not erase a phone already saved. Names are capitalized. A 10-digit phone is saved with dashes, like 712-555-0100. Email addresses are stored in lowercase. The file has to be under 64 KB.
         </p>
         {props.importError ? <p class="error">{props.importError}</p> : null}
         <label>
@@ -1330,7 +1350,7 @@ function WalkInForm(props: { config: AppConfig; csrf: string; shiftId: number; f
             ))}
           </select>
           <span class="hint" id="walkin-contact-hint">
-            Optional. Choosing someone fills their name, email, and phone. A blank field uses the saved contact. Typing someone who is not on the list does not add them to it.
+            Optional. Choosing someone fills their name, email, and phone. A blank field uses the saved contact. Typing someone who is not on the list saves them here when the walk-in is added.
           </span>
         </label>
       ) : null}
@@ -1591,6 +1611,9 @@ const NOTICES: Record<string, string> = {
   'event-removed': 'That event is removed.',
   'settings-saved': 'Settings saved.',
   'contact-removed': 'That person is removed from the contact list.',
+  'contact-saved': 'That contact is saved.',
+  'contact-updated': 'That contact is updated.',
+  'contact-matched': 'That email is already on the contact list.',
 };
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;

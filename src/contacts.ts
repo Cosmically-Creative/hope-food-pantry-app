@@ -2,7 +2,9 @@ import type Database from 'better-sqlite3';
 import { writeAudit } from './auth/audit.js';
 import { EmailAddressError, normalizeEmail } from './email.js';
 import { csvCell, csvImportedCell } from './export.js';
+import { capitalizeName, formatPhone } from './person-format.js';
 import type { SignupValues } from './signup-form.js';
+import { isUniqueConstraint } from './sqlite-error.js';
 
 const MAX_ROWS = 2000;
 export const CONTACT_LIST_PAGE = 20;
@@ -47,6 +49,15 @@ type ReadyContact = {
   email: string;
   phone: string | null;
 };
+
+export type ContactManualValues = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+};
+
+export type ContactManualErrors = Partial<Record<'firstName' | 'lastName' | 'email' | 'phone', string>>;
 
 type ContactRow = {
   id: number;
@@ -139,34 +150,14 @@ export function importContactCsv(
   }
 
   const applied = db.transaction(() => {
-    const find = db.prepare('SELECT first_name, last_name, phone FROM contacts WHERE email_norm = ?');
-    const insert = db.prepare(
-      `INSERT INTO contacts (first_name, last_name, email, email_norm, phone, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    );
-    const update = db.prepare(
-      `UPDATE contacts
-       SET first_name = ?, last_name = ?, email = ?, phone = COALESCE(?, phone), updated_at = ?
-       WHERE email_norm = ?`,
-    );
     let added = 0;
     let changed = 0;
     let unchanged = 0;
     for (const person of ready) {
-      const existing = find.get(person.email) as { first_name: string; last_name: string; phone: string | null } | undefined;
-      if (!existing) {
-        insert.run(person.firstName, person.lastName, person.email, person.email, person.phone, now, now);
-        added += 1;
-        continue;
-      }
-      const phoneChanged = person.phone !== null && person.phone !== existing.phone;
-      const nameChanged = person.firstName !== existing.first_name || person.lastName !== existing.last_name;
-      if (!phoneChanged && !nameChanged) {
-        unchanged += 1;
-        continue;
-      }
-      update.run(person.firstName, person.lastName, person.email, person.phone, now, person.email);
-      changed += 1;
+      const saved = applyContact(db, person, now);
+      if (saved.status === 'added') added += 1;
+      else if (saved.status === 'changed') changed += 1;
+      else unchanged += 1;
     }
     writeAudit(db, coordinatorId, 'contacts.import', { added, changed, unchanged, skipped: skips.length }, now);
     return { added, changed, unchanged };
@@ -230,6 +221,50 @@ export function removeContact(db: Database.Database, coordinatorId: number, id: 
   })();
 }
 
+/**
+ * Saves the person from a confirmed signup.
+ * The same name and email updates that contact. A different name is a new contact, even with the same email.
+ * A blank phone does not erase a phone already saved.
+ */
+export function rememberSignupContact(
+  db: Database.Database,
+  input: { name: string; email: string; phone: string | null },
+  now: string,
+): void {
+  let email: string;
+  try {
+    email = normalizeEmail(input.email);
+  } catch {
+    return;
+  }
+  if (email.length > MAX_EMAIL) return;
+  const parts = splitSignupName(input.name);
+  if (!parts) return;
+  const phone = input.phone?.normalize('NFC').trim() ?? '';
+  if (phone.length > MAX_PHONE || CONTROL.test(phone)) return;
+  applyContact(
+    db,
+    { firstName: parts.firstName, lastName: parts.lastName, email, phone: phone.length === 0 ? null : formatPhone(phone) },
+    now,
+  );
+}
+
+export function saveManualContact(
+  db: Database.Database,
+  coordinatorId: number,
+  values: ContactManualValues,
+  now: string,
+): { ok: true; status: 'added' | 'changed' | 'unchanged' } | { ok: false; errors: ContactManualErrors } {
+  const parsed = manualContact(values);
+  if (!parsed.ok) return parsed;
+  const status = db.transaction(() => {
+    const saved = applyContact(db, parsed.person, now);
+    if (saved.status !== 'unchanged') writeAudit(db, coordinatorId, 'contacts.manual', { id: saved.id }, now);
+    return saved.status;
+  })();
+  return { ok: true, status };
+}
+
 /** Blank name, email, or phone on the form keeps the saved contact's value. */
 export function walkInFromContact(contact: Contact, values: SignupValues): SignupValues {
   return {
@@ -272,6 +307,98 @@ function columnIndex(cells: string[]): { first: number; last: number; email: num
   return { first, last, email, phone };
 }
 
+function splitSignupName(name: string): { firstName: string; lastName: string } | null {
+  if (CONTROL.test(name)) return null;
+  const trimmed = capitalizeName(name);
+  if (!trimmed) return null;
+  const space = trimmed.lastIndexOf(' ');
+  if (space > 0) {
+    const firstName = trimmed.slice(0, space);
+    const lastName = trimmed.slice(space + 1);
+    if (`${firstName} ${lastName}`.length > MAX_NAME) return null;
+    return { firstName, lastName };
+  }
+  if (trimmed.length + 2 > MAX_NAME) return null;
+  return { firstName: trimmed, lastName: '-' };
+}
+
+function manualContact(values: ContactManualValues): { ok: true; person: ReadyContact } | { ok: false; errors: ContactManualErrors } {
+  const errors: ContactManualErrors = {};
+  const firstRaw = values.firstName.normalize('NFC').trim();
+  const lastRaw = values.lastName.normalize('NFC').trim();
+  const firstName = capitalizeName(firstRaw);
+  const lastName = capitalizeName(lastRaw);
+  const phoneRaw = values.phone.normalize('NFC').trim();
+  const phone = phoneRaw.length === 0 ? '' : formatPhone(phoneRaw);
+  if (!firstRaw || !firstName) errors.firstName = 'Enter a first name.';
+  else if (CONTROL.test(firstRaw)) errors.firstName = 'Enter a first name without line breaks.';
+  else if (firstRaw.length > MAX_NAME || firstName.length > MAX_NAME) errors.firstName = `Use ${MAX_NAME} characters or fewer.`;
+  if (!lastRaw || !lastName) errors.lastName = 'Enter a last name.';
+  else if (CONTROL.test(lastRaw)) errors.lastName = 'Enter a last name without line breaks.';
+  else if (lastRaw.length > MAX_NAME || lastName.length > MAX_NAME) errors.lastName = `Use ${MAX_NAME} characters or fewer.`;
+  if (firstName && lastName && !errors.firstName && !errors.lastName && `${firstName} ${lastName}`.length > MAX_NAME) {
+    errors.lastName = `Use ${MAX_NAME} characters or fewer for the full name.`;
+  }
+  if (CONTROL.test(phoneRaw)) errors.phone = 'Enter a phone number without line breaks.';
+  else if (phoneRaw.length > MAX_PHONE || phone.length > MAX_PHONE) errors.phone = `Use ${MAX_PHONE} characters or fewer.`;
+  let email = '';
+  const emailRaw = values.email.normalize('NFC').trim();
+  if (!emailRaw) errors.email = 'Enter an email address.';
+  else if (CONTROL.test(emailRaw)) errors.email = 'Enter an email address without line breaks.';
+  else {
+    try {
+      email = normalizeEmail(emailRaw);
+      if (email.length > MAX_EMAIL) errors.email = 'Enter an email address.';
+    } catch (err) {
+      errors.email = err instanceof EmailAddressError ? err.message : 'Enter an email address.';
+    }
+  }
+  if (Object.keys(errors).length > 0 || !email) return { ok: false, errors };
+  return { ok: true, person: { firstName, lastName, email, phone: phone.length === 0 ? null : phone } };
+}
+
+function findContact(
+  db: Database.Database,
+  person: Pick<ReadyContact, 'firstName' | 'lastName' | 'email'>,
+): { id: number; first_name: string; last_name: string; phone: string | null } | undefined {
+  return db
+    .prepare(
+      `SELECT id, first_name, last_name, phone FROM contacts
+       WHERE first_name = ? COLLATE NOCASE AND last_name = ? COLLATE NOCASE AND email_norm = ?`,
+    )
+    .get(person.firstName, person.lastName, person.email) as
+    | { id: number; first_name: string; last_name: string; phone: string | null }
+    | undefined;
+}
+
+function applyContact(db: Database.Database, person: ReadyContact, now: string): { status: 'added' | 'changed' | 'unchanged'; id: number } {
+  const existing = findContact(db, person);
+  if (!existing) {
+    try {
+      const inserted = db
+        .prepare(
+          `INSERT INTO contacts (first_name, last_name, email, email_norm, phone, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(person.firstName, person.lastName, person.email, person.email, person.phone, now, now);
+      return { status: 'added', id: Number(inserted.lastInsertRowid) };
+    } catch (err) {
+      if (!isUniqueConstraint(err)) throw err;
+    }
+  }
+  const current = existing ?? findContact(db, person);
+  if (!current) throw new Error('The contact could not be saved.');
+  const phoneChanged = person.phone !== null && person.phone !== current.phone;
+  const nameChanged = person.firstName !== current.first_name || person.lastName !== current.last_name;
+  if (!phoneChanged && !nameChanged) return { status: 'unchanged', id: current.id };
+  db.prepare(
+    `UPDATE contacts
+     SET first_name = ?, last_name = ?, email = ?, phone = COALESCE(?, phone), updated_at = ?
+     WHERE id = ?`,
+  ).run(person.firstName, person.lastName, person.email, person.phone, now, current.id);
+  return { status: 'changed', id: current.id };
+}
+
 function parsePerson(cells: string[], columns: { first: number; last: number; email: number; phone: number }): ReadyContact | { code: ContactSkipCode } {
   const firstName = cellAt(cells, columns.first);
   const lastName = cellAt(cells, columns.last);
@@ -279,12 +406,16 @@ function parsePerson(cells: string[], columns: { first: number; last: number; em
   const phoneRaw = cellAt(cells, columns.phone);
   if (!firstName || !lastName) return { code: 'n' };
   if (CONTROL.test(firstName) || CONTROL.test(lastName) || CONTROL.test(phoneRaw) || CONTROL.test(emailRaw)) return { code: 'c' };
-  if (firstName.length > MAX_NAME || lastName.length > MAX_NAME || `${firstName} ${lastName}`.length > MAX_NAME) return { code: 'l' };
-  if (phoneRaw.length > MAX_PHONE) return { code: 'p' };
+  const first = capitalizeName(firstName);
+  const last = capitalizeName(lastName);
+  if (!first || !last) return { code: 'n' };
+  if (first.length > MAX_NAME || last.length > MAX_NAME || `${first} ${last}`.length > MAX_NAME) return { code: 'l' };
+  const phone = phoneRaw.length === 0 ? '' : formatPhone(phoneRaw);
+  if (phoneRaw.length > MAX_PHONE || phone.length > MAX_PHONE) return { code: 'p' };
   try {
     const email = normalizeEmail(emailRaw);
     if (email.length > MAX_EMAIL) return { code: 'e' };
-    return { firstName, lastName, email, phone: phoneRaw.length === 0 ? null : phoneRaw };
+    return { firstName: first, lastName: last, email, phone: phone.length === 0 ? null : phone };
   } catch (err) {
     if (err instanceof EmailAddressError) return { code: 'e' };
     throw err;

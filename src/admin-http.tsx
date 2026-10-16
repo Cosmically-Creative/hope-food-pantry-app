@@ -86,8 +86,11 @@ import {
   loadContacts,
   parseContactSkips,
   removeContact,
+  saveManualContact,
   walkInFromContact,
   type ContactImportSummary,
+  type ContactManualErrors,
+  type ContactManualValues,
 } from './contacts.js';
 import { dateStamp, exportDateRange, exportEventRoster, exportShiftRoster } from './export.js';
 import { originAllowed } from './origin.js';
@@ -139,6 +142,7 @@ export function registerAdmin(app: Hono, services: AdminServices): void {
   app.post(appPath(config, '/admin/settings'), (c) => submitSettings(c, services));
   app.post(appPath(config, '/admin/export'), (c) => submitExportRange(c, services));
   app.get(appPath(config, '/admin/contacts'), (c) => showContacts(c, services));
+  app.post(appPath(config, '/admin/contacts/new'), (c) => submitNewContact(c, services));
   app.post(appPath(config, '/admin/contacts/import'), (c) => submitImportContacts(c, services));
   app.post(appPath(config, '/admin/contacts/export'), (c) => submitExportContacts(c, services));
   app.get(appPath(config, '/admin/contacts/:id/remove'), (c) => showRemoveContact(c, services));
@@ -343,7 +347,12 @@ async function submitExportShift(c: Context, services: AdminServices): Promise<R
 function showContacts(
   c: Context,
   services: AdminServices,
-  options?: { error?: string; status?: 200 | 400 | 403; confirm?: ConfirmPrompt },
+  options?: {
+    error?: string;
+    status?: 200 | 400 | 403;
+    confirm?: ConfirmPrompt;
+    manual?: { values: ContactManualValues; errors: ContactManualErrors };
+  },
 ) {
   const session = requireSession(c, services);
   if (session instanceof Response) return session;
@@ -362,10 +371,30 @@ function showContacts(
       notice={options?.error ? undefined : knownNotice(c.req.query('notice'))}
       summary={options?.error ? undefined : contactSummary(c)}
       importError={options?.error}
+      manual={options?.manual}
       confirm={options?.confirm}
     />,
     { account: session, status: options?.status ?? 200 },
   );
+}
+
+async function submitNewContact(c: Context, services: AdminServices): Promise<Response> {
+  const session = await postedSession(c, services);
+  if (session instanceof Response) return session;
+  const values = {
+    firstName: textField(session.body, 'first_name'),
+    lastName: textField(session.body, 'last_name'),
+    email: textField(session.body, 'email'),
+    phone: textField(session.body, 'phone'),
+  };
+  try {
+    const saved = saveManualContact(services.db, session.coordinatorId, values, services.now());
+    if (!saved.ok) return showContacts(c, services, { status: 400, manual: { values, errors: saved.errors } });
+    const notice = saved.status === 'added' ? 'contact-saved' : saved.status === 'changed' ? 'contact-updated' : 'contact-matched';
+    return c.redirect(appPath(services.config, `/admin/contacts?notice=${notice}`), 303);
+  } catch (err) {
+    return saveFailed(c, services, session, err);
+  }
 }
 
 async function submitImportContacts(c: Context, services: AdminServices): Promise<Response> {
@@ -1452,7 +1481,10 @@ function knownNotice(value: string | undefined): string | undefined {
     value === 'template-removed' ||
     value === 'event-removed' ||
     value === 'settings-saved' ||
-    value === 'contact-removed'
+    value === 'contact-removed' ||
+    value === 'contact-saved' ||
+    value === 'contact-updated' ||
+    value === 'contact-matched'
   ) {
     return value;
   }

@@ -28,7 +28,7 @@ afterEach(() => {
 describe('capacity-safe signup', () => {
   it('saves one person, shows a private confirmation link, and does not send mail', async () => {
     const { app, shiftId, db } = await buildApp();
-    const response = await postSignup(app, shiftId, { name: 'Pat Review', email: ' Pat.Review@Example.invalid ', phone: '712-555-0199', notes: '<script>alert(1)</script>' });
+    const response = await postSignup(app, shiftId, { name: 'pat review', email: ' Pat.Review@Example.invalid ', phone: '7125550199', notes: '<script>alert(1)</script>' });
     expect(response.status).toBe(303);
     const cookie = response.headers.get('set-cookie') ?? '';
     expect(cookie).toContain('HttpOnly');
@@ -53,7 +53,17 @@ describe('capacity-safe signup', () => {
     expect(manageHtml).toContain('Cancel this signup');
     expect(manageHtml).toContain('name="cancel_token"');
     expect(manageHtml).not.toContain('challenges.cloudflare.com');
-    expect(db.prepare("SELECT status FROM signups").get()).toEqual({ status: 'confirmed' });
+    expect(db.prepare('SELECT name, phone, status FROM signups').get()).toEqual({
+      name: 'Pat Review',
+      phone: '712-555-0199',
+      status: 'confirmed',
+    });
+    expect(db.prepare('SELECT first_name, last_name, email, phone FROM contacts').get()).toEqual({
+      first_name: 'Pat',
+      last_name: 'Review',
+      email: 'pat.review@example.invalid',
+      phone: '712-555-0199',
+    });
     expect(manage.headers.get('cache-control')).toBe('no-store');
 
     const again = await postSignup(app, shiftId, { name: 'Pat Review', email: 'pat.review@example.invalid' }, { ip: '203.0.113.21' });
@@ -77,6 +87,10 @@ describe('capacity-safe signup', () => {
       { name: 'Sam Review', email_norm: 'home@example.invalid' },
     ]);
     expect(db.prepare("SELECT COUNT(*) AS n FROM outbox WHERE kind = 'confirmation' AND to_email = 'home@example.invalid'").get()).toEqual({ n: 2 });
+    expect(db.prepare('SELECT first_name, last_name, email FROM contacts ORDER BY id').all()).toEqual([
+      { first_name: 'Pat', last_name: 'Review', email: 'home@example.invalid' },
+      { first_name: 'Sam', last_name: 'Review', email: 'home@example.invalid' },
+    ]);
     const again = await postSignup(app, shiftId, { name: 'sam review', email: 'home@example.invalid' }, { ip: '203.0.113.93' });
     expect(again.status).toBe(409);
     expect(await again.text()).toContain('That person is already signed up for this shift.');
@@ -112,10 +126,10 @@ describe('capacity-safe signup', () => {
       app,
       shiftId,
       {
-        name: 'Minor Pat',
+        name: 'minor pat',
         email: 'minor@example.invalid',
         under18: true,
-        guardianName: 'Guardian Pat',
+        guardianName: 'guardian pat',
         guardianEmail: 'Guardian.Pat@Example.invalid',
       },
       { ip: '203.0.113.42' },

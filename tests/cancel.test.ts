@@ -55,6 +55,11 @@ describe('manage-link cancellation', () => {
     expect(html).toContain('Pat Cancel');
     expect(html).not.toContain('<form');
     expect(db.prepare('SELECT status FROM signups').all()).toEqual([{ status: 'cancelled' }]);
+    expect(db.prepare('SELECT first_name, last_name, email FROM contacts').get()).toEqual({
+      first_name: 'Pat',
+      last_name: 'Cancel',
+      email: 'pat.cancel@example.invalid',
+    });
     expect(db.prepare("SELECT kind, status FROM outbox ORDER BY id").all()).toEqual([
       { kind: 'confirmation', status: 'cancelled' },
       { kind: 'cancelled', status: 'pending' },

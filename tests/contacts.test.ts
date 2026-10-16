@@ -17,6 +17,7 @@ import {
   contactListLimit,
   exportContacts,
   importContactCsv,
+  rememberSignupContact,
 } from '../src/contacts.js';
 import { openAppDatabase } from '../src/db.js';
 import { devEnv } from './env.js';
@@ -28,7 +29,7 @@ const databases: { close: () => void }[] = [];
 
 const PEOPLE = [
   'First Name,Last Name,Email,Phone,Address',
-  'Kristi ,Anderson,Kristi@Example.invalid,712441076,123 Main',
+  'kristi ,ANDERSON,Kristi@Example.invalid,712441076,123 Main',
   'Kara,Acevedo,kara@example.invalid,,',
   'Kara,Acevedo,kara.other@example.invalid,7125550100,456 Oak',
   'Not An,Email,not-an-email,,',
@@ -55,7 +56,7 @@ describe('contact spreadsheet', () => {
     expect(rows).toEqual([
       { first_name: 'Kristi', last_name: 'Anderson', email: 'kristi@example.invalid', phone: '712441076' },
       { first_name: 'Kara', last_name: 'Acevedo', email: 'kara@example.invalid', phone: null },
-      { first_name: 'Kara', last_name: 'Acevedo', email: 'kara.other@example.invalid', phone: '7125550100' },
+      { first_name: 'Kara', last_name: 'Acevedo', email: 'kara.other@example.invalid', phone: '712-555-0100' },
     ]);
     expect(count(db, 'SELECT COUNT(*) AS n FROM signups')).toBe(0);
     expect(count(db, 'SELECT COUNT(*) AS n FROM outbox')).toBe(0);
@@ -64,19 +65,37 @@ describe('contact spreadsheet', () => {
     expect(audit.detail_json).not.toContain('@');
   });
 
-  it('updates a name, replaces a phone, and leaves a blank phone in place', async () => {
+  it('keeps two names that share an email and updates only the matching name', async () => {
     const db = await openDb();
     importContactCsv(db, null, 'First Name,Last Name,Email,Phone\nAda,One,ada@example.invalid,111\n', NOW);
     const renamed = importContactCsv(db, null, 'First Name,Last Name,Email,Phone\nAda,Two,ADA@example.invalid,\n', NOW);
-    expect(renamed.ok && renamed.result.changed).toBe(1);
-    expect(db.prepare('SELECT last_name, phone FROM contacts').get()).toEqual({ last_name: 'Two', phone: '111' });
-    const replaced = importContactCsv(db, null, 'First Name,Last Name,Email,Phone\nAda,Two,ada@example.invalid,222\n', NOW);
+    expect(renamed.ok && renamed.result.added).toBe(1);
+    expect(db.prepare('SELECT first_name, last_name, phone FROM contacts ORDER BY id').all()).toEqual([
+      { first_name: 'Ada', last_name: 'One', phone: '111' },
+      { first_name: 'Ada', last_name: 'Two', phone: null },
+    ]);
+    const replaced = importContactCsv(db, null, 'First Name,Last Name,Email,Phone\nada,two,ada@example.invalid,(712) 555-0100\n', NOW);
     expect(replaced.ok && replaced.result.changed).toBe(1);
-    expect(db.prepare('SELECT phone FROM contacts').get()).toEqual({ phone: '222' });
+    expect(db.prepare('SELECT phone FROM contacts ORDER BY id').all()).toEqual([{ phone: '111' }, { phone: '712-555-0100' }]);
     const same = importContactCsv(db, null, 'First Name,Last Name,Email,Phone\nAda,Two,ada@example.invalid,\n', NOW);
     expect(same.ok && same.result.unchanged).toBe(1);
-    expect(db.prepare('SELECT phone FROM contacts').get()).toEqual({ phone: '222' });
-    expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(1);
+    expect(db.prepare("SELECT phone FROM contacts WHERE last_name = 'Two'").get()).toEqual({ phone: '712-555-0100' });
+    const shaped = importContactCsv(
+      db,
+      null,
+      'First Name,Last Name,Email,Phone\nMcDonald,O\'BRIEN,mac@example.invalid,17125550199\njohn,SMITH,john@example.invalid,712 555 0199\n',
+      NOW,
+    );
+    expect(shaped.ok && shaped.result.added).toBe(2);
+    expect(db.prepare('SELECT first_name, last_name, phone FROM contacts WHERE email = ?').all('mac@example.invalid')).toEqual([
+      { first_name: 'McDonald', last_name: "O'Brien", phone: '712-555-0199' },
+    ]);
+    expect(db.prepare('SELECT first_name, last_name, phone FROM contacts WHERE email = ?').get('john@example.invalid')).toEqual({
+      first_name: 'John',
+      last_name: 'Smith',
+      phone: '712-555-0199',
+    });
+    expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(4);
   });
 
   it('round-trips a formula-looking name and a comma in the last name', async () => {
@@ -122,6 +141,33 @@ describe('contact spreadsheet', () => {
     for (let i = 0; i < 2001; i += 1) lines.push(`A,B,a${i}@b.c`);
     expect(importContactCsv(db, null, lines.join('\n'), NOW)).toEqual({ ok: false, error: CONTACT_CSV_LARGE });
     expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(0);
+  });
+
+  it('saves each signup name as its own contact and keeps a short phone as written', async () => {
+    const db = await openDb();
+    rememberSignupContact(db, { name: 'pat review', email: ' Pat@Example.invalid ', phone: '7125550199' }, NOW);
+    expect(db.prepare('SELECT first_name, last_name, email, phone FROM contacts').get()).toEqual({
+      first_name: 'Pat',
+      last_name: 'Review',
+      email: 'pat@example.invalid',
+      phone: '712-555-0199',
+    });
+    rememberSignupContact(db, { name: 'Pat', email: 'pat@example.invalid', phone: null }, NOW);
+    expect(db.prepare('SELECT first_name, last_name, phone FROM contacts ORDER BY id').all()).toEqual([
+      { first_name: 'Pat', last_name: 'Review', phone: '712-555-0199' },
+      { first_name: 'Pat', last_name: '-', phone: null },
+    ]);
+    rememberSignupContact(db, { name: 'Sam', email: 'sam@example.invalid', phone: '' }, NOW);
+    rememberSignupContact(db, { name: 'sam other', email: 'sam@example.invalid', phone: null }, NOW);
+    expect(db.prepare("SELECT first_name, last_name, phone FROM contacts WHERE email = 'sam@example.invalid' ORDER BY id").all()).toEqual([
+      { first_name: 'Sam', last_name: '-', phone: null },
+      { first_name: 'Sam', last_name: 'Other', phone: null },
+    ]);
+    rememberSignupContact(db, { name: 'PAT REVIEW', email: 'pat@example.invalid', phone: '555' }, NOW);
+    expect(db.prepare("SELECT phone FROM contacts WHERE last_name = 'Review'").get()).toEqual({ phone: '555' });
+    expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(4);
+    expect(count(db, 'SELECT COUNT(*) AS n FROM signups')).toBe(0);
+    expect(count(db, "SELECT COUNT(*) AS n FROM audit WHERE action = 'contacts.manual'")).toBe(0);
   });
 
   it('starts the list at one page and ignores a smaller shown count', () => {
@@ -253,7 +299,12 @@ describe('contact pages', () => {
       phone: '7125550199',
     });
     expect(typed.status).toBe(303);
-    expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(1);
+    expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(2);
+    expect(db.prepare("SELECT first_name, last_name, phone FROM contacts WHERE email = 'pat@example.invalid'").get()).toEqual({
+      first_name: 'Pat',
+      last_name: 'Example',
+      phone: '712-555-0199',
+    });
     expect(count(db, "SELECT COUNT(*) AS n FROM signups WHERE email_norm = 'pat@example.invalid'")).toBe(1);
 
     const missing = await postWalkIn(app, cookie, shiftId, await (await app.request(`/admin/shifts/${shiftId}`, { headers: { cookie } })).text(), {
@@ -272,7 +323,7 @@ describe('contact pages', () => {
     expect(removed.status).toBe(303);
     const after = await app.request(removed.headers.get('location') ?? '', { headers: { cookie } });
     expect(await after.text()).toContain('That person is removed from the contact list.');
-    expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(0);
+    expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(1);
     expect(count(db, "SELECT COUNT(*) AS n FROM signups WHERE email_norm = 'ada@example.invalid' AND status = 'confirmed'")).toBe(1);
     const removeAudit = db.prepare(`SELECT detail_json AS detail_json FROM audit WHERE action = 'contacts.remove'`).get() as {
       detail_json: string;
@@ -410,6 +461,56 @@ describe('contact pages', () => {
     expect(again.status).toBe(400);
     expect(await again.text()).toContain('That person is already signed up for this shift.');
     expect(count(db, `SELECT COUNT(*) AS n FROM signups WHERE email_norm = 'ada@example.invalid'`)).toBe(1);
+  });
+
+  it('saves one contact by hand and does not sign them up', async () => {
+    const { app, db } = await buildApp();
+    const loggedOut = await app.request('/admin/contacts/new', { method: 'POST' });
+    expect(loggedOut.status).toBe(303);
+    const cookie = await signIn(app, db);
+    const page = await app.request('/admin/contacts', { headers: { cookie } });
+    expect(await page.text()).toContain('Save this contact');
+
+    const saved = await postManual(app, cookie, { firstName: 'ada', lastName: 'example', email: 'Ada@Example.invalid', phone: '7125550100' });
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get('location')).toBe('/admin/contacts?notice=contact-saved');
+    const after = await app.request(saved.headers.get('location') ?? '', { headers: { cookie } });
+    const afterHtml = await after.text();
+    expect(afterHtml).toContain('That contact is saved.');
+    expect(afterHtml).toContain('Ada Example');
+    expect(db.prepare('SELECT first_name, last_name, phone FROM contacts').get()).toEqual({
+      first_name: 'Ada',
+      last_name: 'Example',
+      phone: '712-555-0100',
+    });
+    expect(count(db, 'SELECT COUNT(*) AS n FROM signups')).toBe(0);
+    expect(count(db, "SELECT COUNT(*) AS n FROM outbox WHERE kind = 'confirmation'")).toBe(0);
+    const manualAudit = db.prepare(`SELECT detail_json AS detail_json FROM audit WHERE action = 'contacts.manual'`).get() as { detail_json: string };
+    expect(manualAudit.detail_json).not.toContain('@');
+
+    const same = await postManual(app, cookie, { firstName: 'Ada', lastName: 'Example', email: 'ada@example.invalid', phone: '' });
+    expect(same.headers.get('location')).toBe('/admin/contacts?notice=contact-matched');
+    expect(db.prepare('SELECT phone FROM contacts').get()).toEqual({ phone: '712-555-0100' });
+
+    const changed = await postManual(app, cookie, { firstName: 'ADA', lastName: 'EXAMPLE', email: 'ada@example.invalid', phone: '712-555-0199' });
+    expect(changed.status).toBe(303);
+    expect(changed.headers.get('location')).toBe('/admin/contacts?notice=contact-updated');
+    expect(db.prepare('SELECT phone FROM contacts').get()).toEqual({ phone: '712-555-0199' });
+
+    const other = await postManual(app, cookie, { firstName: 'Ada', lastName: 'Other', email: 'ada@example.invalid', phone: '' });
+    expect(other.headers.get('location')).toBe('/admin/contacts?notice=contact-saved');
+    expect(db.prepare('SELECT first_name, last_name, phone FROM contacts ORDER BY id').all()).toEqual([
+      { first_name: 'Ada', last_name: 'Example', phone: '712-555-0199' },
+      { first_name: 'Ada', last_name: 'Other', phone: null },
+    ]);
+
+    const invalid = await postManual(app, cookie, { firstName: '', lastName: 'Example', email: 'not-an-email', phone: '' });
+    expect(invalid.status).toBe(400);
+    const invalidHtml = await invalid.text();
+    expect(invalidHtml).toContain('Enter a first name.');
+    expect(invalidHtml).toContain('Enter an email address.');
+    expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(2);
+    expect(await (await app.request('/')).text()).not.toContain('ada@example.invalid');
   });
 });
 
@@ -565,6 +666,26 @@ async function postContactShift(
       under18: fields.under18 ?? '',
       guardianName: fields.guardianName ?? '',
       guardianEmail: fields.guardianEmail ?? '',
+    }),
+  });
+}
+
+async function postManual(
+  app: Awaited<ReturnType<typeof buildApp>>['app'],
+  cookie: string,
+  fields: { firstName: string; lastName: string; email: string; phone?: string },
+) {
+  const current = await app.request('/admin/contacts', { headers: { cookie } });
+  const token = /name="csrf" value="([^"]*)"/.exec(await current.text())?.[1] ?? '';
+  return app.request('/admin/contacts/new', {
+    method: 'POST',
+    headers: { origin: ORIGIN, 'content-type': 'application/x-www-form-urlencoded', cookie },
+    body: new URLSearchParams({
+      csrf: token,
+      first_name: fields.firstName,
+      last_name: fields.lastName,
+      email: fields.email,
+      phone: fields.phone ?? '',
     }),
   });
 }

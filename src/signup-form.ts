@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { EmailAddressError, normalizeEmail } from './email.js';
+import { capitalizeName, formatPhone } from './person-format.js';
 
 const NAME_MAX = 80;
 const PHONE_MAX = 40;
@@ -58,11 +59,12 @@ export function parseSignupForm(
     .safeParse(input);
   if (!parsed.success) return { ok: false, errors: { form: 'Check the signup fields and try again.' } };
   const errors: SignupErrors = {};
-  const name = parsed.data.name.normalize('NFC').trim();
+  const nameRaw = parsed.data.name.normalize('NFC').trim();
+  const name = capitalizeName(nameRaw);
   const nameLabel = voice === 'coordinator' ? 'their name' : 'your name';
-  if (name.length === 0) errors.name = `Enter ${nameLabel}.`;
-  else if (name.length > NAME_MAX) errors.name = `Use ${NAME_MAX} characters or fewer.`;
-  else if (controlChars.test(name)) errors.name = `Enter ${nameLabel} without line breaks.`;
+  if (nameRaw.length === 0 || name.length === 0) errors.name = `Enter ${nameLabel}.`;
+  else if (nameRaw.length > NAME_MAX || name.length > NAME_MAX) errors.name = `Use ${NAME_MAX} characters or fewer.`;
+  else if (controlChars.test(nameRaw)) errors.name = `Enter ${nameLabel} without line breaks.`;
 
   let emailNorm = '';
   try {
@@ -71,9 +73,10 @@ export function parseSignupForm(
     errors.email = err instanceof EmailAddressError ? err.message : 'Enter an email address.';
   }
 
-  const phone = parsed.data.phone.normalize('NFC').trim();
-  if (phone.length > PHONE_MAX) errors.phone = `Use ${PHONE_MAX} characters or fewer.`;
-  else if (controlChars.test(phone)) errors.phone = 'Enter a phone number without line breaks.';
+  const phoneRaw = parsed.data.phone.normalize('NFC').trim();
+  const phone = phoneRaw.length === 0 ? '' : formatPhone(phoneRaw);
+  if (phoneRaw.length > PHONE_MAX || phone.length > PHONE_MAX) errors.phone = `Use ${PHONE_MAX} characters or fewer.`;
+  else if (controlChars.test(phoneRaw)) errors.phone = 'Enter a phone number without line breaks.';
 
   const notes = parsed.data.notes.normalize('NFC').trim();
   if (notes.length > NOTES_MAX) errors.notes = `Use ${NOTES_MAX} characters or fewer.`;
@@ -83,10 +86,11 @@ export function parseSignupForm(
   let guardianEmail: string | null = null;
   let guardianEmailNorm: string | null = null;
   if (parsed.data.under18) {
-    guardianName = parsed.data.guardianName.normalize('NFC').trim();
-    if (guardianName.length === 0) errors.guardianName = 'Enter the guardian name.';
-    else if (guardianName.length > NAME_MAX) errors.guardianName = `Use ${NAME_MAX} characters or fewer.`;
-    else if (controlChars.test(guardianName)) errors.guardianName = 'Enter the guardian name without line breaks.';
+    const guardianRaw = parsed.data.guardianName.normalize('NFC').trim();
+    guardianName = capitalizeName(guardianRaw);
+    if (guardianRaw.length === 0 || guardianName.length === 0) errors.guardianName = 'Enter the guardian name.';
+    else if (guardianRaw.length > NAME_MAX || guardianName.length > NAME_MAX) errors.guardianName = `Use ${NAME_MAX} characters or fewer.`;
+    else if (controlChars.test(guardianRaw)) errors.guardianName = 'Enter the guardian name without line breaks.';
     if (parsed.data.guardianEmail.trim() === '') {
       errors.guardianEmail = 'Enter the guardian email.';
     } else {

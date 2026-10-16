@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Temporal } from '@js-temporal/polyfill';
 import type Database from 'better-sqlite3';
+import { rememberSignupContact } from './contacts.js';
 import { normalizeEmail } from './email.js';
 import { queueCancellation, queueConfirmation, cancelPendingConfirmations, cancelPendingReminders } from './mail/queue.js';
 import type { MailIdentity } from './mail/types.js';
@@ -236,6 +237,7 @@ function placeReservation(db: Database.Database, input: ReserveInput, emailNorm:
     mail: input.mail,
     now: input.now,
   });
+  rememberSignupContact(db, { name: input.name, email: emailNorm, phone: input.phone }, input.now);
   input.onReserved?.(signupId);
   return { ok: true, signupId, manageToken, replay: false };
 }
