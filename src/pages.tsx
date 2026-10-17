@@ -13,6 +13,11 @@ function asset(config: AppConfig, file: string): string {
   return appPath(config, file);
 }
 
+function pathIs(path: string | undefined, target: string): boolean {
+  if (!path) return false;
+  return path === target || path.startsWith(`${target}/`);
+}
+
 export function Layout(props: {
   config: AppConfig;
   title: string;
@@ -22,8 +27,9 @@ export function Layout(props: {
   children?: Child;
 }) {
   const home = appPath(props.config, '/');
-  const privacy = appPath(props.config, '/privacy');
   const coordinator = appPath(props.config, props.account ? '/admin' : '/login');
+  const coordinatorHere = pathIs(props.path, coordinator);
+  const volunteeringCurrent = props.path === home ? 'page' : undefined;
   const logo = asset(props.config, '/img/logo.png');
   const menu = asset(props.config, '/img/icons/menu.svg');
   const close = asset(props.config, '/img/icons/close.svg');
@@ -46,85 +52,72 @@ export function Layout(props: {
         <a class="skip-link" href="#content">
           Skip to content
         </a>
-        <header class="site-header">
-          <a class="logo-link" href={`${PANTRY_SITE}/`}>
-            <img class="logo" src={logo} alt="Hope Food Pantry" />
-          </a>
-          <input class="nav-toggle" id="nav-toggle" type="checkbox" />
-          <label class="btn-mobile-nav" for="nav-toggle">
-            <img class="icon-mobile-nav icon-open" src={menu} alt="" />
-            <img class="icon-mobile-nav icon-close" src={close} alt="" />
-            <span class="sr-only">Menu</span>
-          </label>
-          <div class="header-side">
-            <nav aria-label="Primary">
-              <ul class="nav-links">
-                <li>
-                  <a class="main-nav-link" href={`${PANTRY_SITE}/`}>
-                    Home
-                  </a>
-                </li>
-                <li>
-                  <a class="main-nav-link" href={`${PANTRY_SITE}/about.html`}>
-                    About
-                  </a>
-                </li>
-                <li>
-                  <a class="main-nav-link" href={`${PANTRY_SITE}/faq.html`}>
-                    FAQ
-                  </a>
-                </li>
-                <li>
-                  <a class="main-nav-link" href={home} aria-current={props.path === home ? 'page' : undefined}>
-                    Volunteering
-                  </a>
-                </li>
-                <li>
-                  <a class="main-nav-link" href={`${PANTRY_SITE}/#contact`}>
-                    Contact
-                  </a>
-                </li>
-                <li>
-                  <a class="btn" href="https://donorbox.org/hope-food-pantry-1">
-                    Donate
-                  </a>
-                </li>
-              </ul>
-            </nav>
-            <ul class="utility-links">
+        <header class="header">
+          <nav class="nav" aria-label="Primary">
+            <a href={`${PANTRY_SITE}/`}>
+              <img class="logo" src={logo} alt="Hope Food Pantry logo" />
+            </a>
+            <ul class="nav-links">
               <li>
-                <a href={home} aria-current={props.path === home ? 'page' : undefined}>
-                  Calendar
+                <a class="main-nav-link" href={`${PANTRY_SITE}/`}>
+                  Home
                 </a>
               </li>
               <li>
-                <a href={privacy} aria-current={props.path === privacy ? 'page' : undefined}>
-                  Privacy
+                <a class="main-nav-link" href={`${PANTRY_SITE}/about`}>
+                  About
                 </a>
               </li>
               <li>
-                <a href={coordinator}>Coordinator</a>
+                <a class="main-nav-link" href={`${PANTRY_SITE}/faq`}>
+                  FAQ
+                </a>
               </li>
-              {props.account ? (
-                <li>
-                  <form method="post" action={appPath(props.config, '/logout')} class="utility-logout">
-                    <input type="hidden" name="csrf" value={props.account.csrf} />
-                    <button type="submit">Log out</button>
-                  </form>
-                </li>
-              ) : null}
+              <li>
+                <a class="main-nav-link" href={home} aria-current={volunteeringCurrent}>
+                  Volunteering
+                </a>
+              </li>
+              <li>
+                <a class="main-nav-link" href={`${PANTRY_SITE}/#contact`}>
+                  Contact
+                </a>
+              </li>
+              <li>
+                <a class="btn" href="https://donorbox.org/hope-food-pantry-1">
+                  Donate
+                </a>
+              </li>
             </ul>
-          </div>
+            <button class="btn-mobile-nav" type="button" aria-expanded="false" aria-label="Menu">
+              <img class="icon-mobile-nav" src={menu} alt="" name="open" />
+              <img class="icon-mobile-nav" src={close} alt="" name="close" />
+            </button>
+          </nav>
         </header>
         <main id="content" tabIndex={-1}>
+          <div class="session-bar">
+            <a href={home} aria-current={props.path === home ? 'page' : undefined}>
+              Calendar
+            </a>
+            <a href={coordinator} class={props.account ? undefined : 'session-entry'} aria-current={coordinatorHere ? 'page' : undefined}>
+              Coordinator
+            </a>
+            {props.account ? (
+              <form method="post" action={appPath(props.config, '/logout')} class="session-logout">
+                <input type="hidden" name="csrf" value={props.account.csrf} />
+                <button type="submit">Log out</button>
+              </form>
+            ) : null}
+          </div>
           {props.children}
         </main>
-        <footer class="site-footer">
-          <img class="footer-wave" src={wave} alt="" />
-          <div class="footer-nav">
-            <div class="footer-brand">
-              <a class="logo-link" href={`${PANTRY_SITE}/`}>
-                <img class="logo" src={logo} alt="Hope Food Pantry" />
+        <footer class="footer">
+          <img class="wave wave-secondary" src={wave} alt="" />
+          <nav class="footer-nav" aria-label="Footer">
+            <div>
+              <a href={`${PANTRY_SITE}/`}>
+                <img class="logo" src={logo} alt="Hope Food Pantry logo" />
               </a>
               <p class="equal-text">
                 Hope Food Pantry is an{' '}
@@ -134,30 +127,30 @@ export function Layout(props: {
               </p>
             </div>
             <div class="footer-cell">
-              <h2>Contact Us</h2>
+              <h3>Contact Us</h3>
               <p>
-                <a href="tel:+17125409351">712-540-9351</a>
+                <a href="tel:+17125409351">712‑540‑9351</a>
               </p>
               <p>
                 <a href="mailto:hopepantry@gmail.com">hopepantry@gmail.com</a>
               </p>
               <div class="social-links">
                 <a href="https://www.facebook.com/schopefoodpantry" target="_blank" rel="noopener noreferrer">
-                  <span class="social-flex">
-                    <img src={facebook} alt="" />
-                    <span>schopefoodpantry</span>
-                  </span>
+                  <div class="social-flex">
+                    <img src={facebook} alt="facebook icon" />
+                    <p>schopefoodpantry</p>
+                  </div>
                 </a>
                 <a href="https://www.instagram.com/hopefoodpantrysc" target="_blank" rel="noopener noreferrer">
-                  <span class="social-flex">
-                    <img src={instagram} alt="" />
-                    <span>hopefoodpantrysc</span>
-                  </span>
+                  <div class="social-flex">
+                    <img src={instagram} alt="instagram icon" />
+                    <p>hopefoodpantrysc</p>
+                  </div>
                 </a>
               </div>
             </div>
             <div class="footer-cell">
-              <h2>Address</h2>
+              <h3>Address</h3>
               <address>
                 <p>
                   4155 US 75 Ave
@@ -166,41 +159,52 @@ export function Layout(props: {
                   <br />
                   (Rear of Property)
                 </p>
+                <br />
                 <p>Mail to: PO Box 21</p>
               </address>
             </div>
             <div class="footer-cell">
-              <h2>Navigation</h2>
-              <ul class="footer-links">
+              <h3>Navigation</h3>
+              <ul class="footer-nav-links">
                 <li>
-                  <a href={`${PANTRY_SITE}/`}>Home</a>
+                  <a class="main-nav-link" href={`${PANTRY_SITE}/`}>
+                    Home
+                  </a>
                 </li>
                 <li>
-                  <a href={`${PANTRY_SITE}/about.html`}>About</a>
+                  <a class="main-nav-link" href={`${PANTRY_SITE}/about`}>
+                    About
+                  </a>
                 </li>
                 <li>
-                  <a href={`${PANTRY_SITE}/faq.html`}>FAQ</a>
+                  <a class="main-nav-link" href={`${PANTRY_SITE}/faq`}>
+                    FAQ
+                  </a>
                 </li>
                 <li>
-                  <a href={home} aria-current={props.path === home ? 'page' : undefined}>
+                  <a class="main-nav-link" href={home} aria-current={volunteeringCurrent}>
                     Volunteering
                   </a>
                 </li>
                 <li>
-                  <a href={`${PANTRY_SITE}/#contact`}>Contact</a>
+                  <a class="main-nav-link" href={`${PANTRY_SITE}/#contact`}>
+                    Contact
+                  </a>
                 </li>
                 <li>
-                  <a href="https://donorbox.org/hope-food-pantry-1">Donate</a>
-                </li>
-                <li>
-                  <a href={privacy} aria-current={props.path === privacy ? 'page' : undefined}>
-                    Privacy
+                  <a class="main-nav-link" href="https://donorbox.org/hope-food-pantry-1">
+                    Donate
                   </a>
                 </li>
               </ul>
             </div>
-          </div>
-          <p class="copyright-text">Hope Food Pantry, Sioux Center, Iowa</p>
+          </nav>
+          <p class="copyright-text">
+            Hope Food Pantry © 2026 | Design & Development by{' '}
+            <a href="https://cosmicallycreative.com" target="_blank" rel="noopener noreferrer">
+              Cosmically Creative
+            </a>
+          </p>
         </footer>
         {props.turnstile ? <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer /> : null}
         <script src={appPath(props.config, '/js/enhance.js')} defer />
@@ -597,8 +601,8 @@ function CalendarDayCell(props: { config: AppConfig; day: CalendarDay; today: st
             <span class="today-flag" aria-hidden="true">
               Today
             </span>
-          ) : null}
-        </p>
+            ) : null}
+          </p>
         {props.shifts.length > 0 ? (
           <details class="day-reveal" name={props.weekName} data-date={props.day.date}>
             <summary class="day-summary">

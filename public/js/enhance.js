@@ -1,9 +1,29 @@
 (function () {
+  bindNav();
   bindCalendar();
   document.querySelectorAll('[data-contact]').forEach(bindContact);
   document.querySelectorAll('[data-see-more]').forEach(bindSeeMore);
   var boxes = document.querySelectorAll('[data-under-18]');
   for (var i = 0; i < boxes.length; i += 1) bind(boxes[i]);
+
+  function bindNav() {
+    var header = document.querySelector('.header');
+    var button = document.querySelector('.btn-mobile-nav');
+    if (!header || !button) return;
+    button.addEventListener('click', function () {
+      var open = header.classList.toggle('nav-open');
+      button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    var close = function () {
+      header.classList.remove('nav-open');
+      button.setAttribute('aria-expanded', 'false');
+    };
+    var links = document.querySelectorAll('.main-nav-link, .session-bar a');
+    for (var i = 0; i < links.length; i += 1) links[i].addEventListener('click', close);
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') close();
+    });
+  }
 
   function bindCalendar() {
     var calendar = document.querySelector('.shift-calendar');

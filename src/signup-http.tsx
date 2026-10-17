@@ -5,6 +5,7 @@ import type { Context } from 'hono';
 import type { Hono } from 'hono';
 import type { Child } from 'hono/jsx';
 import { listMoveTargets, switchSignup } from './admin/store.js';
+import { readSession } from './auth/session.js';
 import { cancelTokenMatches, issueCancelToken, issueReminderPageToken, issueSwitchToken, reminderPageTokenMatches, switchTokenMatches } from './cancel-token.js';
 import { clientAddress } from './client-ip.js';
 import { confirmationCookie, openConfirmation, sealConfirmation } from './confirm-cookie.js';
@@ -65,7 +66,7 @@ export function registerPublicSignup(app: Hono, services: SignupServices): void 
 
   app.get(appPath(config, '/s/:id'), (c) => {
     const shift = loadShift(services, c.req.param('id') ?? '');
-    if (!shift) return html(c, config, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
+    if (!shift) return html(c, services, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
     return shiftResponse(c, services, shift, 200, blankForm(services, shift));
   });
 
@@ -73,14 +74,14 @@ export function registerPublicSignup(app: Hono, services: SignupServices): void 
 
   app.get(appPath(config, '/s/:id/confirmed'), (c) => {
     const shift = loadShift(services, c.req.param('id') ?? '');
-    if (!shift) return html(c, config, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
+    if (!shift) return html(c, services, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
     const seal = openConfirmation(config.sessionSecret, c.req.header('cookie'), epochMs(services.now()));
     const manage = seal && seal.shiftId === shift.id ? readManageSignup(services.db, seal.token, services.now()) : null;
     const matches = Boolean(manage && seal && manage.signupId === seal.signupId);
     const cancelled = matches && manage?.status === 'cancelled';
     return html(
       c,
-      config,
+      services,
       cancelled ? 'This signup is cancelled · Hope Volunteer' : "You're signed up · Hope Volunteer",
       <ConfirmationPage
         config={config}
@@ -103,7 +104,7 @@ async function submitSignup(c: Context, services: SignupServices): Promise<Respo
   const { config, db } = services;
   const now = services.now();
   const shift = loadShift(services, c.req.param('id') ?? '');
-  if (!shift) return html(c, config, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
+  if (!shift) return html(c, services, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
   const ip = clientAddress(config.trustProxy, peerAddress(c, services.clientIp), c.req.header('x-forwarded-for'));
   if (!originAllowed(c, config.baseUrl)) {
     return shiftResponse(c, services, shift, 403, formFor(services, shift, EMPTY_SIGNUP, {}, null), ORIGIN);
@@ -174,7 +175,7 @@ async function submitSignup(c: Context, services: SignupServices): Promise<Respo
       mail: mailIdentity(db, config),
     });
     if (reserved.ok) return redirectConfirmed(c, services, shift.id, reserved.manageToken ? { signupId: reserved.signupId, token: reserved.manageToken } : null);
-    if (reserved.reason === 'not_found') return html(c, config, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
+    if (reserved.reason === 'not_found') return html(c, services, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
     if (reserved.reason === 'closed') return shiftResponse(c, services, loadShift(services, String(shift.id)) ?? shift, 400, null, CLOSED);
     if (reserved.reason === 'full') return shiftResponse(c, services, loadShift(services, String(shift.id)) ?? shift, 409, null, FULL);
     if (reserved.reason === 'duplicate') {
@@ -221,7 +222,7 @@ function shiftResponse(
   const showForm = signup !== null && !current.cancelled && !current.ended && !current.full;
   return html(
     c,
-    services.config,
+    services,
     `${current.role} · Hope Volunteer`,
     <ShiftPage config={services.config} shift={current} signup={showForm ? signup : null} notice={notice} />,
     status,
@@ -306,7 +307,7 @@ function showManage(c: Context, services: SignupServices, token: string, status:
   const note = manageNote(c.req.query('notice'));
   return html(
     c,
-    services.config,
+    services,
     'Your signup · Hope Volunteer',
     <ManagePage
       signup={signup}
@@ -330,9 +331,9 @@ function missingManage(c: Context, services: SignupServices) {
   const limit = recordInvalidManageToken(services.db, services.config.sessionSecret, services.now(), ip);
   if (limit.limited) {
     c.header('Retry-After', String(limit.retryAfter));
-    return html(c, services.config, 'Please wait · Hope Volunteer', <WaitPage />, 429);
+    return html(c, services, 'Please wait · Hope Volunteer', <WaitPage />, 429);
   }
-  return html(c, services.config, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
+  return html(c, services, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
 }
 
 async function submitCancel(c: Context, services: SignupServices): Promise<Response> {
@@ -362,7 +363,7 @@ async function submitSwitch(c: Context, services: SignupServices): Promise<Respo
   const token = c.req.param('token') ?? '';
   const signup = readManageSignup(services.db, token, services.now());
   if (!originAllowed(c, services.config.baseUrl)) {
-    if (!signup) return html(c, services.config, 'Your signup · Hope Volunteer', <SwitchAlreadyPage />, 403);
+    if (!signup) return html(c, services, 'Your signup · Hope Volunteer', <SwitchAlreadyPage />, 403);
     return showManage(c, services, token, 403, SWITCH_ORIGIN);
   }
   const body = await c.req.parseBody();
@@ -388,7 +389,7 @@ async function submitSwitch(c: Context, services: SignupServices): Promise<Respo
     }
     const result = switchSignup(services.db, signup.signupId, destination, formToken.claims.operationId, services.now(), mailIdentity(services.db, services.config));
     if (!result.ok) return showManage(c, services, token, 400, result.error);
-    if (!result.manageToken) return html(c, services.config, 'Your signup · Hope Volunteer', <SwitchAlreadyPage />);
+    if (!result.manageToken) return html(c, services, 'Your signup · Hope Volunteer', <SwitchAlreadyPage />);
     c.header('Cache-Control', 'no-store');
     return c.redirect(appPath(services.config, `/m/${result.manageToken}?notice=switched`), 303);
   } catch (err) {
@@ -404,7 +405,7 @@ function switchedAlready(c: Context, services: SignupServices, token: string, bo
   if (!formToken.ok) return missingManage(c, services);
   const shiftId = confirmedOperationShift(services.db, formToken.claims.operationId);
   if (shiftId === null) return missingManage(c, services);
-  return html(c, services.config, 'Your signup · Hope Volunteer', <SwitchAlreadyPage />);
+  return html(c, services, 'Your signup · Hope Volunteer', <SwitchAlreadyPage />);
 }
 
 function switchForm(services: SignupServices, token: string, signup: { status: 'confirmed' | 'cancelled'; shiftId: number; eventId: number; name: string; email: string }): SwitchForm | null {
@@ -471,15 +472,16 @@ function cancelForm(services: SignupServices, token: string, status: 'confirmed'
 
 function html(
   c: Context,
-  config: AppConfig,
+  services: SignupServices,
   title: string,
   body: Child,
   status: 200 | 400 | 403 | 404 | 409 | 429 | 503 = 200,
   turnstile = false,
 ) {
   c.header('Cache-Control', 'no-store');
+  const account = readSession(services.db, c.req.header('cookie'), services.now());
   return c.html(
-    <Layout config={config} title={title} path={c.req.path} turnstile={turnstile}>
+    <Layout config={services.config} title={title} path={c.req.path} turnstile={turnstile} account={account ? { csrf: account.csrf } : null}>
       {body}
     </Layout>,
     status,
