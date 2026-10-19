@@ -520,6 +520,8 @@ describe('coordinator screens', () => {
     const page = await app.request(`/admin/shifts/${sourceId}`, { headers: { cookie } });
     const html = await page.text();
     expect(optionValues(html, 'destination')).toEqual([String(destinationId)]);
+    expect(html).toContain('<optgroup label="Friday, October 23, 2026">');
+    expect(html).toContain('>Distribution, October 23, 2026, 9:00 AM to 12:00 PM CDT<');
     const moved = await postMove(app, cookie, signupId, html, String(destinationId));
     expect(moved.status).toBe(303);
     expect(moved.headers.get('location')).toBe(`/admin/shifts/${destinationId}?notice=moved`);

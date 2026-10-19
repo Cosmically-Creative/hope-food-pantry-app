@@ -121,6 +121,10 @@ export type EventRemoval = {
 
 export type MoveTarget = {
   id: number;
+  /** Local start date, YYYY-MM-DD. Menus group choices that share this date. */
+  date: string;
+  /** Local date heading, such as Tuesday, October 20, 2026. */
+  dateLabel: string;
   label: string;
 };
 
@@ -929,6 +933,12 @@ export function findSignupShift(db: Database.Database, signupId: number): number
   return row ? row.shift_id : null;
 }
 
+/** "Tuesday, October 20, 2026" becomes "October 20, 2026". The weekday stays on the menu group. */
+function dateWithoutWeekday(dateLabel: string): string {
+  const comma = dateLabel.indexOf(', ');
+  return comma === -1 ? dateLabel : dateLabel.slice(comma + 2);
+}
+
 /** Other open shifts in this event that still have a spot. Full, cancelled, and ended shifts are omitted. */
 export function listMoveTargets(
   db: Database.Database,
@@ -973,7 +983,9 @@ export function listMoveTargets(
     const end = formatInstantInZone(row.ends_at_utc, row.tz);
     return [{
       id: row.id,
-      label: `${row.role}, ${start.dateLabel}, ${start.timeLabel} to ${end.timeLabel} ${end.abbreviation}`,
+      date: start.date,
+      dateLabel: start.dateLabel,
+      label: `${row.role}, ${dateWithoutWeekday(start.dateLabel)}, ${start.timeLabel} to ${end.timeLabel} ${end.abbreviation}`,
     }];
   });
 }
@@ -1016,7 +1028,9 @@ export function listOpenShiftsForPerson(
     const publicity = row.published === 1 ? '' : ' (not on the public list)';
     return [{
       id: row.id,
-      label: `${row.title}: ${row.role}, ${start.dateLabel}, ${start.timeLabel} to ${end.timeLabel} ${end.abbreviation}${publicity}`,
+      date: start.date,
+      dateLabel: start.dateLabel,
+      label: `${row.title}: ${row.role}, ${dateWithoutWeekday(start.dateLabel)}, ${start.timeLabel} to ${end.timeLabel} ${end.abbreviation}${publicity}`,
     }];
   });
 }

@@ -15,6 +15,7 @@ import {
 } from './contacts.js';
 import type { SignupErrors, SignupValues } from './signup-form.js';
 import { addLocalDays, todayInZone } from './time.js';
+import { ShiftTargetOptions } from './shift-options.js';
 import { appPath } from './url.js';
 
 export type WalkInState = {
@@ -353,7 +354,7 @@ export function ContactsPage(props: {
       ) : null}
       {hiddenSkips > 0 ? <p class="panel-note">{hiddenSkips === 1 ? '1 more row was skipped.' : `${hiddenSkips} more rows were skipped.`}</p> : null}
       <p>
-        Someone who signs up is saved here. Cancelling that signup does not remove them. A different name is a separate contact, even when the email matches. To add someone who has not signed up, import a spreadsheet or save them below. That does not take a spot and does not send email. Choose a name to add that person to an open shift. Old signups lose their details after the retention period. This list stays until you remove someone.
+        Someone who signs up is saved here. Cancelling that signup does not remove them. A different name is a separate contact, even when the email matches. To add someone who has not signed up, import a spreadsheet or save them below. That does not take a spot and does not send email. Choose a name to correct that person or add them to an open shift. Old signups lose their details after the retention period. This list stays until you remove someone.
       </p>
       <form method="post" action={appPath(props.config, '/admin/contacts/new')} class="signup-form desk-download">
         <input type="hidden" name="csrf" value={props.csrf} />
@@ -440,11 +441,22 @@ export function ContactPage(props: {
   shifts: MoveTarget[];
   form: WalkInState;
   shiftId: string;
+  notice?: string;
+  correction?: { values: ContactManualValues; errors: ContactManualErrors };
   error?: string;
 }) {
   const values = props.form.values;
   const errors = props.form.errors;
   const errorEntries = Object.entries(errors).filter((entry): entry is [string, string] => Boolean(entry[1]));
+  const correction = props.correction ?? {
+    values: {
+      firstName: props.contact.firstName,
+      lastName: props.contact.lastName,
+      email: props.contact.email,
+      phone: props.contact.phone ?? '',
+    },
+    errors: {},
+  };
   return (
     <>
       <p>
@@ -453,6 +465,27 @@ export function ContactPage(props: {
       <h1>{props.contact.name}</h1>
       <p>{props.contact.email}</p>
       {props.contact.phone ? <p>{props.contact.phone}</p> : null}
+      <Notice notice={props.notice} />
+      <form method="post" action={appPath(props.config, `/admin/contacts/${props.contact.id}`)} class="signup-form">
+        <input type="hidden" name="csrf" value={props.csrf} />
+        <h2>Correct this contact</h2>
+        <p>
+          This changes the saved person. A different name stays this contact and does not create a second person. It does not change a signup, take a spot, or send email. Names are capitalized. A 10-digit phone is saved with dashes, like 712-555-0100. A blank phone removes the saved number.
+        </p>
+        <WalkInField id="correct-first" label="First name" name="first_name" type="text" value={correction.values.firstName} error={correction.errors.firstName} />
+        <WalkInField id="correct-last" label="Last name" name="last_name" type="text" value={correction.values.lastName} error={correction.errors.lastName} />
+        <WalkInField id="correct-email" label="Email" name="email" type="email" value={correction.values.email} error={correction.errors.email} />
+        <WalkInField
+          id="correct-phone"
+          label="Phone (optional)"
+          name="phone"
+          type="tel"
+          value={correction.values.phone}
+          error={correction.errors.phone}
+          hint="We will not text them"
+        />
+        <button type="submit">Save this correction</button>
+      </form>
       {props.error ? <p class="error">{props.error}</p> : null}
       <h2>Add to a shift</h2>
       <p>Choose an open shift. This uses their saved name, email, and phone. It takes one spot and queues a confirmation email. Their name stays off the public list. Full, cancelled, and ended shifts are left off this list, and so is a shift they are already on.</p>
@@ -474,14 +507,7 @@ export function ContactPage(props: {
           <label for="add-shift">
             Shift
             <select id="add-shift" name="shift" required>
-              <option value="" selected={props.shiftId === '' ? true : undefined}>
-                Choose a shift
-              </option>
-              {props.shifts.map((shift) => (
-                <option value={String(shift.id)} key={shift.id} selected={props.shiftId === String(shift.id) ? true : undefined}>
-                  {shift.label}
-                </option>
-              ))}
+              <ShiftTargetOptions targets={props.shifts} selectedId={props.shiftId} />
             </select>
           </label>
           <label for="add-notes">
@@ -1479,12 +1505,7 @@ function Roster(props: { config: AppConfig; csrf: string; people: RosterPerson[]
                   <label for={`move-${person.id}`}>
                     Move to
                     <select id={`move-${person.id}`} name="destination" required>
-                      <option value="">Choose a shift</option>
-                      {props.moves.targets.map((target) => (
-                        <option value={String(target.id)} key={target.id}>
-                          {target.label}
-                        </option>
-                      ))}
+                      <ShiftTargetOptions targets={props.moves.targets} />
                     </select>
                   </label>
                   <button type="submit">Move</button>
@@ -1614,6 +1635,8 @@ const NOTICES: Record<string, string> = {
   'contact-saved': 'That contact is saved.',
   'contact-updated': 'That contact is updated.',
   'contact-matched': 'That email is already on the contact list.',
+  'contact-corrected': 'That contact is corrected.',
+  'contact-same': 'That contact already matches.',
 };
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;

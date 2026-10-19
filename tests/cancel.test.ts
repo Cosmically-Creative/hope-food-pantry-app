@@ -170,6 +170,8 @@ describe('manage-link switch', () => {
     const html = await before.text();
     expect(before.status).toBe(200);
     expect(optionValues(html)).toEqual([String(destinationId)]);
+    expect(html).toContain('<optgroup label="Saturday, October 17, 2026">');
+    expect(html).toContain('>Distribution, October 17, 2026, 9:00 AM to 12:00 PM CDT<');
     expect(html).toContain('>Switch<');
     expect(db.prepare('SELECT status, shift_id FROM signups').get()).toEqual({ status: 'confirmed', shift_id: shiftId });
 
@@ -284,6 +286,31 @@ describe('manage-link switch', () => {
       status: 'pending',
     });
     expect(db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'signup.switch'").get()).toEqual({ n: 0 });
+  });
+
+  it('groups switch choices under each date', async () => {
+    const { app, db, shiftId } = await buildApp();
+    const eventId = Number((db.prepare('SELECT id AS id FROM events').get() as { id: number }).id);
+    const morningId = insertShift(db, eventId, 'Intake', '2026-10-17T14:00:00.000Z', '2026-10-17T16:00:00.000Z', 2);
+    const afternoonId = insertShift(db, eventId, 'Distribution', '2026-10-17T19:00:00.000Z', '2026-10-17T21:00:00.000Z', 2);
+    const tuesdayId = insertShift(db, eventId, 'Packing', '2026-10-20T14:00:00.000Z', '2026-10-20T17:00:00.000Z', 2);
+    const { managePath } = await openManage(app, shiftId, 'date.switch@example.invalid', '203.0.113.45');
+    const html = await (await app.request(managePath)).text();
+    const select = /<select\b[^>]*\bid="switch-to"[^>]*>([\s\S]*?)<\/select>/.exec(html)?.[1] ?? '';
+    const saturday = select.indexOf('<optgroup label="Saturday, October 17, 2026">');
+    const tuesday = select.indexOf('<optgroup label="Tuesday, October 20, 2026">');
+    const morning = select.indexOf(`<option value="${morningId}">`);
+    const afternoon = select.indexOf(`<option value="${afternoonId}">`);
+    const later = select.indexOf(`<option value="${tuesdayId}">`);
+    expect(saturday).toBeGreaterThanOrEqual(0);
+    expect(morning).toBeGreaterThan(saturday);
+    expect(afternoon).toBeGreaterThan(morning);
+    expect(tuesday).toBeGreaterThan(afternoon);
+    expect(later).toBeGreaterThan(tuesday);
+    expect(select).toContain('>Intake, October 17, 2026, 9:00 AM to 11:00 AM CDT<');
+    expect(select).toContain('>Distribution, October 17, 2026, 2:00 PM to 4:00 PM CDT<');
+    expect(select).toContain('>Packing, October 20, 2026, 9:00 AM to 12:00 PM CDT<');
+    expect(select.match(/<optgroup/g)).toHaveLength(2);
   });
 });
 

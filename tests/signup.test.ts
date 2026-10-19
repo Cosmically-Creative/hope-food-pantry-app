@@ -51,9 +51,11 @@ describe('capacity-safe signup', () => {
     expect(confirmed.status).toBe(200);
     expect(confirmedHtml).toContain('Pat Review');
     expect(confirmedHtml).toContain('A confirmation email is on the way');
-    expect(confirmedHtml).toContain('Cancel or switch shifts');
+    expect(confirmedHtml).toContain('Save the address below');
+    expect(confirmedHtml).toContain('This browser keeps it for a few minutes');
     const managePath = confirmedHtml.match(/href="(\/m\/[^"]+)"/)?.[1];
     expect(managePath).toBeTruthy();
+    expect(confirmedHtml).toContain(`>http://127.0.0.1:3000${managePath}<`);
     expect(cookie).not.toContain(managePath?.slice(3) ?? 'missing-token');
     const manage = await app.request(managePath ?? '/m/missing');
     const manageHtml = await manage.text();
@@ -81,9 +83,11 @@ describe('capacity-safe signup', () => {
     const again = await postSignup(app, shiftId, { name: 'Pat Review', email: 'pat.review@example.invalid' }, { ip: '203.0.113.21' });
     expect(again.status).toBe(409);
     const againHtml = await again.text();
-    expect(againHtml).toContain('That person is already signed up for this shift.');
+    expect(againHtml).toContain('That person is already signed up for this shift. Use the link in the confirmation email.');
     expect(againHtml).not.toContain('already registered');
     expect(againHtml).not.toContain('duplicate');
+    expect(againHtml).not.toContain(managePath ?? '/m/');
+    expect(againHtml).not.toContain('/m/');
 
     expect(db.prepare("SELECT COUNT(*) AS n FROM signups WHERE status = 'confirmed'").get()).toEqual({ n: 1 });
   });
@@ -105,7 +109,9 @@ describe('capacity-safe signup', () => {
     ]);
     const again = await postSignup(app, shiftId, { name: 'sam review', email: 'home@example.invalid' }, { ip: '203.0.113.93' });
     expect(again.status).toBe(409);
-    expect(await again.text()).toContain('That person is already signed up for this shift.');
+    const againHtml = await again.text();
+    expect(againHtml).toContain('That person is already signed up for this shift. Use the link in the confirmation email.');
+    expect(againHtml).not.toContain('/m/');
     expect(db.prepare("SELECT COUNT(*) AS n FROM signups WHERE status = 'confirmed'").get()).toEqual({ n: 2 });
   });
 

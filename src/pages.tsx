@@ -4,6 +4,7 @@ import { WEEKDAY_SHORT, calendarMonth, calendarToday, chooseCalendarMonth, month
 import { spotsSentence, type PublicEvent, type PublicShift } from './schedule.js';
 import type { SignupErrors, SignupValues } from './signup-form.js';
 import type { MoveTarget } from './admin/store.js';
+import { ShiftTargetOptions } from './shift-options.js';
 import type { ManageView } from './signup.js';
 import { appPath } from './url.js';
 
@@ -296,11 +297,11 @@ export function ConfirmationPage(props: {
         <>
           <p>
             {props.cancelled
-              ? 'A cancellation email is on the way. The link below still opens this cancelled signup.'
-              : 'A confirmation email is on the way. Save the link below in case the email is late. Use it to cancel or switch to a different shift.'}
+              ? 'A cancellation email is on the way. The address below still opens this cancelled signup.'
+              : 'A confirmation email is on the way. Save the address below in case the email is late. This browser keeps it for a few minutes. Use it to cancel or switch to a different shift.'}
           </p>
-          <p>
-            <a href={props.managePath}>{props.cancelled ? 'View this signup' : 'Cancel or switch shifts'}</a>
+          <p class="saved-link">
+            <a href={props.managePath}>{`${props.config.baseUrl}${props.managePath}`}</a>
           </p>
         </>
       ) : (
@@ -384,12 +385,7 @@ export function ManagePage(props: {
             <label for="switch-to">
               Switch to
               <select id="switch-to" name="destination" required>
-                <option value="">Choose a shift</option>
-                {props.switches.targets.map((target) => (
-                  <option value={String(target.id)} key={target.id}>
-                    {target.label}
-                  </option>
-                ))}
+                <ShiftTargetOptions targets={props.switches.targets} />
               </select>
             </label>
             <button type="submit">Switch</button>

@@ -446,6 +446,16 @@ main a:hover {
   color: var(--hope-ink-2);
 }
 
+.saved-link {
+  margin: 0.85rem 0 0.2rem;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.saved-link a {
+  user-select: all;
+}
+
 .shift-calendar {
   margin-top: 1.25rem;
 }
@@ -2226,6 +2236,11 @@ button.btn-quiet::before {
 
   .event-page .desk-actions {
     flex-direction: column;
+  }
+
+  .event-page .desk-actions .btn,
+  .event-page .desk-actions .desk-inline {
+    flex: 0 0 auto;
   }
 
   .event-page .desk-actions .btn,

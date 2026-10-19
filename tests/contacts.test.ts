@@ -385,8 +385,15 @@ describe('contact pages', () => {
     expect(personHtml).toContain('555-0100');
     expect(personHtml).toContain('id="add-shift"');
     expect(personHtml).toContain('Choose a shift');
-    expect(personHtml).toContain(`<option value="${openId}">`);
-    expect(personHtml).toContain(`<option value="${unpublishedId}">`);
+    const addMenu = /<select\b[^>]*\bid="add-shift"[^>]*>([\s\S]*?)<\/select>/.exec(personHtml)?.[1] ?? '';
+    const wednesday = addMenu.indexOf('<optgroup label="Wednesday, October 21, 2026">');
+    const thursday = addMenu.indexOf('<optgroup label="Thursday, October 22, 2026">');
+    expect(wednesday).toBeGreaterThanOrEqual(0);
+    expect(addMenu.indexOf(`<option value="${openId}">`)).toBeGreaterThan(wednesday);
+    expect(thursday).toBeGreaterThan(wednesday);
+    expect(addMenu.indexOf(`<option value="${unpublishedId}">`)).toBeGreaterThan(thursday);
+    expect(addMenu).toContain('>Weekly pantry: Sorting, October 21, 2026, 9:00 AM to 12:00 PM CDT<');
+    expect(addMenu).toContain('>Soup kitchen: Serving, October 22, 2026, 9:00 AM to 12:00 PM CDT (not on the public list)<');
     expect(personHtml).toContain('Serving');
     expect(personHtml).toContain('(not on the public list)');
     expect(personHtml).not.toContain('Closing');
@@ -511,6 +518,157 @@ describe('contact pages', () => {
     expect(invalidHtml).toContain('Enter an email address.');
     expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(2);
     expect(await (await app.request('/')).text()).not.toContain('ada@example.invalid');
+  });
+
+  it('corrects a saved name, email, or phone without creating another person', async () => {
+    const { app, db } = await buildApp();
+    const cookie = await signIn(app, db);
+    const openId = insertShift(db);
+    await postFile(
+      app,
+      cookie,
+      'First Name,Last Name,Email,Phone\nPat,-,pat@example.invalid,7125550101\nPat,Other,pat@example.invalid,222\n',
+    );
+    const contactId = (db.prepare(`SELECT id AS id FROM contacts WHERE last_name = '-'`).get() as { id: number }).id;
+    const otherId = (db.prepare(`SELECT id AS id FROM contacts WHERE last_name = 'Other'`).get() as { id: number }).id;
+
+    const person = await app.request(`/admin/contacts/${contactId}`, { headers: { cookie } });
+    const personHtml = await person.text();
+    expect(person.status).toBe(200);
+    expect(personHtml).toContain('Correct this contact');
+    expect(personHtml).toContain('Save this correction');
+    expect(personHtml).toContain('value="Pat"');
+    expect(personHtml).toContain('value="-"');
+    expect(personHtml).toContain('value="pat@example.invalid"');
+    expect(personHtml).toContain('value="712-555-0101"');
+    expect(personHtml).toContain('Add to this shift');
+
+    const loggedOut = await app.request(`/admin/contacts/${contactId}`, { method: 'POST' });
+    expect(loggedOut.status).toBe(303);
+    expect(db.prepare('SELECT last_name, phone FROM contacts WHERE id = ?').get(contactId)).toEqual({
+      last_name: '-',
+      phone: '712-555-0101',
+    });
+
+    const stale = await postCorrect(app, cookie, contactId, {
+      firstName: 'Pat',
+      lastName: 'Review',
+      email: 'pat@example.invalid',
+      phone: '7125550199',
+      csrf: 'nope',
+    });
+    expect(stale.status).toBe(403);
+    expect(db.prepare('SELECT last_name FROM contacts WHERE id = ?').get(contactId)).toEqual({ last_name: '-' });
+
+    const corrected = await postCorrect(app, cookie, contactId, {
+      firstName: 'pat',
+      lastName: 'review',
+      email: 'Pat@Example.invalid',
+      phone: '7125550199',
+    });
+    expect(corrected.status).toBe(303);
+    expect(corrected.headers.get('location')).toBe(`/admin/contacts/${contactId}?notice=contact-corrected`);
+    const after = await app.request(corrected.headers.get('location') ?? '', { headers: { cookie } });
+    const afterHtml = await after.text();
+    expect(afterHtml).toContain('That contact is corrected.');
+    expect(afterHtml).toContain('Pat Review');
+    expect(afterHtml).toContain('value="Review"');
+    expect(afterHtml).toContain('value="712-555-0199"');
+    expect(db.prepare('SELECT id, first_name, last_name, email, phone FROM contacts ORDER BY id').all()).toEqual([
+      { id: contactId, first_name: 'Pat', last_name: 'Review', email: 'pat@example.invalid', phone: '712-555-0199' },
+      { id: otherId, first_name: 'Pat', last_name: 'Other', email: 'pat@example.invalid', phone: '222' },
+    ]);
+    const correctAudit = db.prepare(`SELECT detail_json AS detail_json FROM audit WHERE action = 'contacts.correct'`).get() as {
+      detail_json: string;
+    };
+    expect(correctAudit.detail_json).toBe(`{"id":${contactId}}`);
+    expect(correctAudit.detail_json).not.toContain('@');
+    expect(count(db, 'SELECT COUNT(*) AS n FROM signups')).toBe(0);
+    expect(count(db, `SELECT COUNT(*) AS n FROM outbox WHERE kind = 'confirmation'`)).toBe(0);
+
+    const added = await postContactShift(app, cookie, contactId, openId, afterHtml, {});
+    expect(added.status).toBe(303);
+    expect(db.prepare(`SELECT name AS name, phone AS phone FROM signups WHERE email_norm = 'pat@example.invalid'`).get()).toEqual({
+      name: 'Pat Review',
+      phone: '712-555-0199',
+    });
+    expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(2);
+
+    const same = await postCorrect(app, cookie, contactId, {
+      firstName: 'Pat',
+      lastName: 'Review',
+      email: 'pat@example.invalid',
+      phone: '712-555-0199',
+    });
+    expect(same.headers.get('location')).toBe(`/admin/contacts/${contactId}?notice=contact-same`);
+    expect(count(db, `SELECT COUNT(*) AS n FROM audit WHERE action = 'contacts.correct'`)).toBe(1);
+
+    const renamedEmail = await postCorrect(app, cookie, contactId, {
+      firstName: 'Pat',
+      lastName: 'Review',
+      email: 'Patrick@Example.invalid',
+      phone: '712-555-0199',
+    });
+    expect(renamedEmail.headers.get('location')).toBe(`/admin/contacts/${contactId}?notice=contact-corrected`);
+    expect(db.prepare('SELECT email, phone FROM contacts WHERE id = ?').get(contactId)).toEqual({
+      email: 'patrick@example.invalid',
+      phone: '712-555-0199',
+    });
+    expect(db.prepare('SELECT email FROM contacts WHERE id = ?').get(otherId)).toEqual({ email: 'pat@example.invalid' });
+
+    const taken = await postCorrect(app, cookie, contactId, {
+      firstName: 'Pat',
+      lastName: 'Other',
+      email: 'pat@example.invalid',
+      phone: '712-555-0199',
+    });
+    expect(taken.status).toBe(400);
+    const takenHtml = await taken.text();
+    expect(takenHtml).toContain('That name and email are already saved as another contact.');
+    expect(takenHtml).toContain('value="Other"');
+    expect(db.prepare('SELECT first_name, last_name, email FROM contacts WHERE id = ?').get(contactId)).toEqual({
+      first_name: 'Pat',
+      last_name: 'Review',
+      email: 'patrick@example.invalid',
+    });
+    expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(2);
+
+    const cleared = await postCorrect(app, cookie, contactId, {
+      firstName: 'Pat',
+      lastName: 'Review',
+      email: 'patrick@example.invalid',
+      phone: '',
+    });
+    expect(cleared.status).toBe(303);
+    expect(db.prepare('SELECT phone FROM contacts WHERE id = ?').get(contactId)).toEqual({ phone: null });
+    expect(db.prepare(`SELECT phone AS phone FROM signups WHERE email_norm = 'pat@example.invalid'`).get()).toEqual({
+      phone: '712-555-0199',
+    });
+
+    const invalid = await postCorrect(app, cookie, contactId, {
+      firstName: '',
+      lastName: 'Review',
+      email: 'not-an-email',
+      phone: '7125550199',
+    });
+    expect(invalid.status).toBe(400);
+    const invalidHtml = await invalid.text();
+    expect(invalidHtml).toContain('Enter a first name.');
+    expect(invalidHtml).toContain('Enter an email address.');
+    expect(db.prepare('SELECT first_name, email, phone FROM contacts WHERE id = ?').get(contactId)).toEqual({
+      first_name: 'Pat',
+      email: 'patrick@example.invalid',
+      phone: null,
+    });
+
+    const missing = await postCorrect(app, cookie, 999, {
+      firstName: 'Pat',
+      lastName: 'Review',
+      email: 'patrick@example.invalid',
+      phone: '',
+    });
+    expect(missing.status).toBe(404);
+    expect(count(db, `SELECT COUNT(*) AS n FROM audit WHERE action = 'contacts.correct'`)).toBe(3);
   });
 });
 
@@ -666,6 +824,27 @@ async function postContactShift(
       under18: fields.under18 ?? '',
       guardianName: fields.guardianName ?? '',
       guardianEmail: fields.guardianEmail ?? '',
+    }),
+  });
+}
+
+async function postCorrect(
+  app: Awaited<ReturnType<typeof buildApp>>['app'],
+  cookie: string,
+  contactId: number,
+  fields: { firstName: string; lastName: string; email: string; phone?: string; csrf?: string },
+) {
+  const current = await app.request('/admin/contacts', { headers: { cookie } });
+  const token = fields.csrf ?? (/name="csrf" value="([^"]*)"/.exec(await current.text())?.[1] ?? '');
+  return app.request(`/admin/contacts/${contactId}`, {
+    method: 'POST',
+    headers: { origin: ORIGIN, 'content-type': 'application/x-www-form-urlencoded', cookie },
+    body: new URLSearchParams({
+      csrf: token,
+      first_name: fields.firstName,
+      last_name: fields.lastName,
+      email: fields.email,
+      phone: fields.phone ?? '',
     }),
   });
 }

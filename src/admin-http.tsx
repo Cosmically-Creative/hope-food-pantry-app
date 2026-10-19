@@ -79,6 +79,7 @@ import type { MailIdentity } from './mail/types.js';
 import { issueFormToken, newOperationId, readFormToken } from './form-token.js';
 import {
   contactListLimit,
+  correctContact,
   exportContacts,
   formatContactSkips,
   getContact,
@@ -149,6 +150,7 @@ export function registerAdmin(app: Hono, services: AdminServices): void {
   app.post(appPath(config, '/admin/contacts/:id/remove'), (c) => submitRemoveContact(c, services));
   app.post(appPath(config, '/admin/contacts/:id/add'), (c) => submitAddContactToShift(c, services));
   app.get(appPath(config, '/admin/contacts/:id'), (c) => showContact(c, services));
+  app.post(appPath(config, '/admin/contacts/:id'), (c) => submitCorrectContact(c, services));
   app.get(appPath(config, '/admin/events/new'), (c) => showNewEvent(c, services));
   app.post(appPath(config, '/admin/events'), (c) => submitNewEvent(c, services));
   app.get(appPath(config, '/admin/events/:id/remove'), (c) => showRemoveEvent(c, services));
@@ -440,7 +442,13 @@ function showRemoveContact(c: Context, services: AdminServices, error?: string, 
 function showContact(
   c: Context,
   services: AdminServices,
-  state?: { error?: string; status?: 200 | 400; form?: WalkInState; shiftId?: string },
+  state?: {
+    error?: string;
+    status?: 200 | 400;
+    form?: WalkInState;
+    shiftId?: string;
+    correction?: { values: ContactManualValues; errors: ContactManualErrors };
+  },
 ) {
   const session = requireSession(c, services);
   if (session instanceof Response) return session;
@@ -457,10 +465,35 @@ function showContact(
       shifts={listOpenShiftsForPerson(services.db, { email: contact.email, name: contact.name }, services.now())}
       form={state?.form ?? blankWalkIn(services, contact.id)}
       shiftId={state?.shiftId ?? ''}
+      notice={state?.status === 400 ? undefined : knownNotice(c.req.query('notice'))}
+      correction={state?.correction}
       error={state?.error}
     />,
     { account: session, status: state?.status ?? 200 },
   );
+}
+
+async function submitCorrectContact(c: Context, services: AdminServices): Promise<Response> {
+  const session = await postedSession(c, services);
+  if (session instanceof Response) return session;
+  const id = idFrom(c);
+  const values = {
+    firstName: textField(session.body, 'first_name'),
+    lastName: textField(session.body, 'last_name'),
+    email: textField(session.body, 'email'),
+    phone: textField(session.body, 'phone'),
+  };
+  try {
+    const saved = correctContact(services.db, session.coordinatorId, id, values, services.now());
+    if (!saved.ok) {
+      if ('missing' in saved) return missing(c, services);
+      return showContact(c, services, { status: 400, correction: { values, errors: saved.errors } });
+    }
+    const notice = saved.status === 'changed' ? 'contact-corrected' : 'contact-same';
+    return c.redirect(appPath(services.config, `/admin/contacts/${id}?notice=${notice}`), 303);
+  } catch (err) {
+    return saveFailed(c, services, session, err);
+  }
 }
 
 function contactShiftUnavailable(c: Context, services: AdminServices, email: string, name: string, shiftId: number, form: WalkInState) {
@@ -1484,7 +1517,9 @@ function knownNotice(value: string | undefined): string | undefined {
     value === 'contact-removed' ||
     value === 'contact-saved' ||
     value === 'contact-updated' ||
-    value === 'contact-matched'
+    value === 'contact-matched' ||
+    value === 'contact-corrected' ||
+    value === 'contact-same'
   ) {
     return value;
   }

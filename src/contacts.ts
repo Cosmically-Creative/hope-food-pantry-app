@@ -265,6 +265,49 @@ export function saveManualContact(
   return { ok: true, status };
 }
 
+/**
+ * Replaces the name, email, and phone on one saved contact.
+ * A different name stays this contact. A blank phone removes the saved number.
+ */
+export function correctContact(
+  db: Database.Database,
+  coordinatorId: number,
+  id: number,
+  values: ContactManualValues,
+  now: string,
+): { ok: true; status: 'changed' | 'unchanged' } | { ok: false; missing: true } | { ok: false; errors: ContactManualErrors } {
+  const parsed = manualContact(values);
+  if (!parsed.ok) return parsed;
+  const person = parsed.person;
+  return db.transaction(() => {
+    const current = getContact(db, id);
+    if (!current) return { ok: false as const, missing: true as const };
+    if (
+      person.firstName === current.firstName &&
+      person.lastName === current.lastName &&
+      person.email === current.email &&
+      person.phone === current.phone
+    ) {
+      return { ok: true as const, status: 'unchanged' as const };
+    }
+    try {
+      const updated = db
+        .prepare(
+          `UPDATE contacts
+           SET first_name = ?, last_name = ?, email = ?, email_norm = ?, phone = ?, updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(person.firstName, person.lastName, person.email, person.email, person.phone, now, id);
+      if (updated.changes !== 1) return { ok: false as const, missing: true as const };
+    } catch (err) {
+      if (!isUniqueConstraint(err)) throw err;
+      return { ok: false as const, errors: { email: 'That name and email are already saved as another contact.' } };
+    }
+    writeAudit(db, coordinatorId, 'contacts.correct', { id }, now);
+    return { ok: true as const, status: 'changed' as const };
+  })();
+}
+
 /** Blank name, email, or phone on the form keeps the saved contact's value. */
 export function walkInFromContact(contact: Contact, values: SignupValues): SignupValues {
   return {

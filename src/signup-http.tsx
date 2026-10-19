@@ -35,7 +35,8 @@ import { appPath, cookiePath } from './url.js';
 
 const COULD_NOT_SAVE =
   'This signup could not be saved. If this shift is already in your confirmation, use that link.';
-const ALREADY_SIGNED_UP = 'That person is already signed up for this shift.';
+const ALREADY_SIGNED_UP =
+  'That person is already signed up for this shift. Use the link in the confirmation email.';
 const TOO_FAST = 'Please wait a few seconds and submit the form again.';
 const CHECK_AGAIN = 'The check did not finish. Please try again.';
 const CHECK_UNAVAILABLE = 'The check could not be reached. Please try again in a little while.';
