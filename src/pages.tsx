@@ -288,23 +288,23 @@ export function ConfirmationPage(props: {
       <h1>{props.cancelled ? 'This signup is cancelled' : "You're signed up"}</h1>
       <p>
         {props.cancelled
-          ? `${props.name ? `${props.name} is no longer signed up for ` : 'This signup is no longer for '}${props.shift.role}.`
-          : `${props.name ? `${props.name} is signed up for ` : 'This signup is for '}${props.shift.role}.`}
+          ? `${props.name ? `${props.name} is no longer on the ` : 'This signup is no longer for the '}${props.shift.role} shift.`
+          : `${props.name ? `${props.name} is on the ` : 'This signup is for the '}${props.shift.role} shift.`}
       </p>
       <ShiftWhen shift={props.shift} />
       {props.managePath ? (
         <>
           <p>
             {props.cancelled
-              ? 'A cancellation email is queued. This link still opens the cancelled signup.'
-              : 'A confirmation email is queued. Save this link too, in case the email is delayed. It opens this signup, where you can cancel it or switch it to another open shift.'}
+              ? 'A cancellation email is on the way. The link below still opens this cancelled signup.'
+              : 'A confirmation email is on the way. Save the link below in case the email is late. Use it to cancel or switch to a different shift.'}
           </p>
           <p>
-            <a href={props.managePath}>Open this signup</a>
+            <a href={props.managePath}>{props.cancelled ? 'View this signup' : 'Cancel or switch shifts'}</a>
           </p>
         </>
       ) : (
-        <p>If you just signed up, the link stays in this browser for a few minutes. A confirmation email is queued.</p>
+        <p>If you just signed up, the link stays in this browser for a few minutes. A confirmation email is on the way.</p>
       )}
     </>
   );
@@ -329,7 +329,7 @@ export function ManagePage(props: {
   return (
     <>
       <h1>Your signup</h1>
-      <p class="status">{signup.status === 'confirmed' ? 'Confirmed' : 'Cancelled'}</p>
+      <p class={signup.status === 'confirmed' ? 'status is-confirmed' : 'status'}>{signup.status === 'confirmed' ? 'Confirmed' : 'Cancelled'}</p>
       <p>{signup.eventTitle}</p>
       <h2>{signup.role}</h2>
       <p class="when">
@@ -739,7 +739,28 @@ function SignupForm(props: { config: AppConfig; shiftId: number; form: SignupFor
           <input name="company_website" type="text" tabindex={-1} autocomplete="off" value="" />
         </label>
       </div>
-      <Field id="signup-name" label="Name" name="name" type="text" value={form.values.name} error={errors.name} autoComplete="name" />
+      <div class="name-pair">
+        <Field
+          id="signup-firstName"
+          label="First name"
+          name="first_name"
+          type="text"
+          value={form.values.firstName}
+          error={errors.firstName}
+          autoComplete="given-name"
+          required
+        />
+        <Field
+          id="signup-lastName"
+          label="Last name"
+          name="last_name"
+          type="text"
+          value={form.values.lastName}
+          error={errors.lastName}
+          autoComplete="family-name"
+          required
+        />
+      </div>
       <Field id="signup-email" label="Email" name="email" type="email" value={form.values.email} error={errors.email} autoComplete="email" />
       <Field
         id="signup-phone"
@@ -803,6 +824,7 @@ function Field(props: {
   error?: string;
   autoComplete: string;
   hint?: string;
+  required?: boolean;
 }) {
   const errorId = `${props.id}-error`;
   const hintId = `${props.id}-hint`;
@@ -816,6 +838,7 @@ function Field(props: {
         type={props.type}
         value={props.value}
         autocomplete={props.autoComplete}
+        required={props.required ? true : undefined}
         aria-invalid={props.error ? 'true' : undefined}
         aria-describedby={describedBy}
       />

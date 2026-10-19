@@ -113,6 +113,10 @@ describe('public pages', () => {
     expect(shiftHtml).toContain('1/3 spots filled');
     expect(shiftHtml).toContain('spots is-open');
     expect(shiftHtml).toContain('<form');
+    expect(shiftHtml).toContain('name="first_name"');
+    expect(shiftHtml).toContain('name="last_name"');
+    expect(shiftHtml).toContain('First name');
+    expect(shiftHtml).toContain('Last name');
     expect(shiftHtml).toContain('We will not text you');
     expect(shiftHtml).toContain('https://challenges.cloudflare.com/turnstile/v0/api.js');
     expect(shiftHtml).toContain('data-under-18');

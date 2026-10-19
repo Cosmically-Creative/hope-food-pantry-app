@@ -277,7 +277,9 @@ function loadShift(services: SignupServices, rawId: string): PublicShift | null 
 
 function valuesFrom(body: Record<string, unknown>): SignupValues {
   return {
-    name: textField(body, 'name'),
+    name: '',
+    firstName: textField(body, 'first_name'),
+    lastName: textField(body, 'last_name'),
     email: textField(body, 'email'),
     phone: textField(body, 'phone'),
     notes: textField(body, 'notes'),

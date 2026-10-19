@@ -8,6 +8,8 @@ const NOTES_MAX = 500;
 
 export type SignupValues = {
   name: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string;
   notes: string;
@@ -16,7 +18,9 @@ export type SignupValues = {
   guardianEmail: string;
 };
 
-export type SignupErrors = Partial<Record<'name' | 'email' | 'phone' | 'notes' | 'guardianName' | 'guardianEmail' | 'form', string>>;
+export type SignupErrors = Partial<
+  Record<'name' | 'firstName' | 'lastName' | 'email' | 'phone' | 'notes' | 'guardianName' | 'guardianEmail' | 'form', string>
+>;
 
 export type SignupDraft = {
   name: string;
@@ -32,6 +36,8 @@ export type SignupDraft = {
 
 export const EMPTY_SIGNUP: SignupValues = {
   name: '',
+  firstName: '',
+  lastName: '',
   email: '',
   phone: '',
   notes: '',
@@ -42,6 +48,15 @@ export const EMPTY_SIGNUP: SignupValues = {
 
 const controlChars = /[\u0000-\u001F\u007F]/;
 
+function personPart(raw: string, label: string): { value: string; error?: string } {
+  const trimmed = raw.normalize('NFC').trim();
+  const value = capitalizeName(trimmed);
+  if (trimmed.length === 0 || value.length === 0) return { value: '', error: `Enter your ${label}.` };
+  if (trimmed.length > NAME_MAX || value.length > NAME_MAX) return { value, error: `Use ${NAME_MAX} characters or fewer.` };
+  if (controlChars.test(trimmed)) return { value, error: `Enter your ${label} without line breaks.` };
+  return { value };
+}
+
 export function parseSignupForm(
   input: SignupValues,
   voice: 'volunteer' | 'coordinator' = 'volunteer',
@@ -49,6 +64,8 @@ export function parseSignupForm(
   const parsed = z
     .object({
       name: z.string(),
+      firstName: z.string(),
+      lastName: z.string(),
       email: z.string(),
       phone: z.string(),
       notes: z.string(),
@@ -59,12 +76,23 @@ export function parseSignupForm(
     .safeParse(input);
   if (!parsed.success) return { ok: false, errors: { form: 'Check the signup fields and try again.' } };
   const errors: SignupErrors = {};
-  const nameRaw = parsed.data.name.normalize('NFC').trim();
-  const name = capitalizeName(nameRaw);
-  const nameLabel = voice === 'coordinator' ? 'their name' : 'your name';
-  if (nameRaw.length === 0 || name.length === 0) errors.name = `Enter ${nameLabel}.`;
-  else if (nameRaw.length > NAME_MAX || name.length > NAME_MAX) errors.name = `Use ${NAME_MAX} characters or fewer.`;
-  else if (controlChars.test(nameRaw)) errors.name = `Enter ${nameLabel} without line breaks.`;
+  let name = '';
+  if (voice === 'coordinator') {
+    const nameRaw = parsed.data.name.normalize('NFC').trim();
+    name = capitalizeName(nameRaw);
+    if (nameRaw.length === 0 || name.length === 0) errors.name = 'Enter their name.';
+    else if (nameRaw.length > NAME_MAX || name.length > NAME_MAX) errors.name = `Use ${NAME_MAX} characters or fewer.`;
+    else if (controlChars.test(nameRaw)) errors.name = 'Enter their name without line breaks.';
+  } else {
+    const first = personPart(parsed.data.firstName, 'first name');
+    const last = personPart(parsed.data.lastName, 'last name');
+    if (first.error) errors.firstName = first.error;
+    if (last.error) errors.lastName = last.error;
+    if (!first.error && !last.error && `${first.value} ${last.value}`.length > NAME_MAX) {
+      errors.lastName = `Use ${NAME_MAX} characters or fewer for the full name.`;
+    }
+    name = first.error || last.error || errors.lastName ? '' : `${first.value} ${last.value}`;
+  }
 
   let emailNorm = '';
   try {

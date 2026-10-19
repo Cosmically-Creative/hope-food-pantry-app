@@ -1519,6 +1519,8 @@ function isAttendanceMark(value: string): value is AttendanceMark {
 function signupValuesFrom(body: Record<string, unknown>): SignupValues {
   return {
     name: textField(body, 'name'),
+    firstName: '',
+    lastName: '',
     email: textField(body, 'email'),
     phone: textField(body, 'phone'),
     notes: textField(body, 'notes'),

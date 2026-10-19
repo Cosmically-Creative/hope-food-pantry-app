@@ -26,6 +26,18 @@ afterEach(() => {
 });
 
 describe('capacity-safe signup', () => {
+  it('requires a first name and a last name', async () => {
+    const { app, shiftId } = await buildApp();
+    const missingLast = await postSignup(app, shiftId, { firstName: 'Pat', lastName: '', email: 'pat.only@example.invalid' }, { ip: '203.0.113.11' });
+    expect(missingLast.status).toBe(400);
+    const missingLastHtml = await missingLast.text();
+    expect(missingLastHtml).toContain('Enter your last name.');
+    expect(missingLastHtml).toContain('value="Pat"');
+    const missingFirst = await postSignup(app, shiftId, { firstName: ' ', lastName: 'Review', email: 'review.only@example.invalid' }, { ip: '203.0.113.12' });
+    expect(missingFirst.status).toBe(400);
+    expect(await missingFirst.text()).toContain('Enter your first name.');
+  });
+
   it('saves one person, shows a private confirmation link, and does not send mail', async () => {
     const { app, shiftId, db } = await buildApp();
     const response = await postSignup(app, shiftId, { name: 'pat review', email: ' Pat.Review@Example.invalid ', phone: '7125550199', notes: '<script>alert(1)</script>' });
@@ -38,8 +50,8 @@ describe('capacity-safe signup', () => {
     const confirmedHtml = await confirmed.text();
     expect(confirmed.status).toBe(200);
     expect(confirmedHtml).toContain('Pat Review');
-    expect(confirmedHtml).toContain('A confirmation email is queued');
-    expect(confirmedHtml).toContain('where you can cancel it');
+    expect(confirmedHtml).toContain('A confirmation email is on the way');
+    expect(confirmedHtml).toContain('Cancel or switch shifts');
     const managePath = confirmedHtml.match(/href="(\/m\/[^"]+)"/)?.[1];
     expect(managePath).toBeTruthy();
     expect(cookie).not.toContain(managePath?.slice(3) ?? 'missing-token');
@@ -396,7 +408,18 @@ function insertExtraShift(
 async function postSignup(
   app: ReturnType<typeof createApp>,
   shiftId: number,
-  fields: Partial<{ name: string; email: string; phone: string; notes: string; under18: boolean; guardianName: string; guardianEmail: string; company: string }>,
+  fields: Partial<{
+    name: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    notes: string;
+    under18: boolean;
+    guardianName: string;
+    guardianEmail: string;
+    company: string;
+  }>,
   options?: { token?: string; issuedAt?: number; ip?: string; origin?: string; forwardedFor?: string; site?: string },
 ) {
   const secret = 'dev-only-change-me-not-for-production-use';
@@ -405,9 +428,12 @@ async function postSignup(
     issuedAt: options?.issuedAt ?? NOW_MS - 10_000,
     operationId: randomBytes(16).toString('hex'),
   });
+  const postedName = (fields.name ?? 'Pat Review').trim();
+  const splitAt = postedName.indexOf(' ');
   const body = new URLSearchParams({
     form_token: token,
-    name: fields.name ?? 'Pat Review',
+    first_name: fields.firstName ?? (splitAt === -1 ? postedName : postedName.slice(0, splitAt)),
+    last_name: fields.lastName ?? (splitAt === -1 ? '' : postedName.slice(splitAt + 1).trim()),
     email: fields.email ?? 'pat.review@example.invalid',
     phone: fields.phone ?? '',
     notes: fields.notes ?? '',

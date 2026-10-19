@@ -872,7 +872,8 @@ article.shift-card {
 }
 
 .spots.is-open,
-.spots.is-full {
+.spots.is-full,
+.status.is-confirmed {
   display: inline-block;
   width: fit-content;
   margin-top: 0.45rem;
@@ -881,7 +882,8 @@ article.shift-card {
   color: var(--hope-ink);
 }
 
-.spots.is-open {
+.spots.is-open,
+.status.is-confirmed {
   background: var(--hope-open);
   border: 1px solid var(--hope-open-edge);
 }
@@ -960,6 +962,12 @@ article.shift-card {
 
 .signup-form h2 {
   font-size: 1.6rem;
+}
+
+.name-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.95rem;
 }
 
 .signup-form label,
@@ -2279,6 +2287,10 @@ button.btn-quiet::before {
 
   .desk-range label {
     max-width: none;
+  }
+
+  .name-pair {
+    grid-template-columns: 1fr;
   }
 }
 
