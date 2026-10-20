@@ -170,6 +170,11 @@ a.btn:active {
   color: var(--hope-ink);
 }
 
+/* Same-origin clicks crossfade. Named chrome stays in place while the page changes. */
+@view-transition {
+  navigation: auto;
+}
+
 .header {
   position: relative;
   font-size: 18px;
@@ -179,6 +184,7 @@ a.btn:active {
 }
 
 .nav {
+  view-transition-name: site-header;
   left: 0;
   position: fixed;
   z-index: 999;
@@ -298,6 +304,7 @@ a.btn:active {
 }
 
 .session-bar {
+  view-transition-name: session-bar;
   position: fixed;
   z-index: 1000;
   top: 118px;
@@ -1921,6 +1928,7 @@ button.btn-quiet::before {
 /* Footer. Pixel sizes match hopefoodpantrysc.org. */
 
 .footer {
+  view-transition-name: site-footer;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -2701,6 +2709,16 @@ button.btn-quiet::before {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  @view-transition {
+    navigation: none;
+  }
+
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+
   html {
     scroll-behavior: auto;
   }

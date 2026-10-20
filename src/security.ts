@@ -24,7 +24,7 @@ export const PERMISSIONS_POLICY = 'camera=(), microphone=(), geolocation=(), pay
 export const STRICT_TRANSPORT_SECURITY = 'max-age=31536000';
 
 /** HSTS is sent only when BASE_URL is https. A browser ignores it over http. */
-export function securityHeaders(options: { https: boolean }): MiddlewareHandler {
+export function securityHeaders(options: { https: boolean; speculationRules?: string }): MiddlewareHandler {
   return async (c, next) => {
     await next();
     c.header('Content-Security-Policy', CONTENT_SECURITY_POLICY);
@@ -32,5 +32,8 @@ export function securityHeaders(options: { https: boolean }): MiddlewareHandler 
     c.header('X-Content-Type-Options', 'nosniff');
     c.header('Permissions-Policy', PERMISSIONS_POLICY);
     if (options.https) c.header('Strict-Transport-Security', STRICT_TRANSPORT_SECURITY);
+    if (options.speculationRules && (c.res.headers.get('content-type') ?? '').includes('text/html')) {
+      c.header('Speculation-Rules', `"${options.speculationRules}"`);
+    }
   };
 }

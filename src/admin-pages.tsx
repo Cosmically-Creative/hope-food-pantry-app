@@ -16,6 +16,7 @@ import {
 import type { SignupErrors, SignupValues } from './signup-form.js';
 import { addLocalDays, todayInZone } from './time.js';
 import { ShiftTargetOptions } from './shift-options.js';
+import { assetHref } from './static-assets.js';
 import { appPath } from './url.js';
 
 export type WalkInState = {
@@ -243,12 +244,12 @@ export function AdminHome(props: {
           />
           <form method="dialog" class="event-dialog-dismiss">
             <button type="submit" class="event-dialog-close" aria-label="Close">
-              <img src={appPath(props.config, '/img/icons/close.svg')} alt="" />
+              <img src={assetHref(props.config, '/img/icons/close.svg')} alt="" />
             </button>
           </form>
         </div>
       </dialog>
-      <script src={appPath(props.config, '/js/event-dialog.js')} defer />
+      <script src={assetHref(props.config, '/js/event-dialog.js')} defer />
     </>
   );
 }
@@ -877,7 +878,7 @@ function ConfirmDialog(props: { config: AppConfig; csrf: string; prompt?: Confir
         <div class="confirm-card">
           <form method="dialog" id="confirm-dismiss" class="confirm-x">
             <button type="submit" class="event-dialog-close" aria-label="Close">
-              <img src={appPath(props.config, '/img/icons/close.svg')} alt="" />
+              <img src={assetHref(props.config, '/img/icons/close.svg')} alt="" />
             </button>
           </form>
           <form method="post" id="confirm-form" class="confirm-form" action={prompt?.action ?? ''} data-keep-place="">
@@ -904,7 +905,7 @@ function ConfirmDialog(props: { config: AppConfig; csrf: string; prompt?: Confir
           </form>
         </div>
       </dialog>
-      <script src={appPath(props.config, '/js/confirm-dialog.js')} defer />
+      <script src={assetHref(props.config, '/js/confirm-dialog.js')} defer />
     </>
   );
 }

@@ -1,6 +1,3 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { serveStatic } from '@hono/node-server/serve-static';
 import type Database from 'better-sqlite3';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -14,12 +11,11 @@ import { privacyParagraphs, readPantrySettings } from './settings.js';
 import { registerReminderOff } from './reminder-http.js';
 import { registerPublicSignup } from './signup-http.js';
 import { securityHeaders } from './security.js';
+import { SHARED_ASSET_CACHE, SPECULATION_RULES, assetCacheControl, publicDirectory, readPublicFile, rewriteCssUrls, staticAssetStamp } from './static-assets.js';
 import { nowUtc } from './time.js';
 import { appPath } from './url.js';
 
-export function publicDirectory(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public');
-}
+export { publicDirectory };
 
 export function createApp(
   config: AppConfig,
@@ -35,7 +31,7 @@ export function createApp(
   const now = () => options?.now ?? nowUtc();
   const publicDir = options?.publicDir ?? publicDirectory();
 
-  app.use('*', securityHeaders({ https: config.secureCookies }));
+  app.use('*', securityHeaders({ https: config.secureCookies, speculationRules: appPath(config, '/speculation-rules.json') }));
   app.use('*', bodyLimit({
     maxSize: 64 * 1024,
     onError: (c) => {
@@ -47,6 +43,12 @@ export function createApp(
   app.use(appPath(config, '/brand/*'), staticFiles(config, publicDir));
   app.use(appPath(config, '/img/*'), staticFiles(config, publicDir));
   app.use(appPath(config, '/js/*'), staticFiles(config, publicDir));
+
+  app.get(appPath(config, '/speculation-rules.json'), (c) => {
+    c.header('Cache-Control', SHARED_ASSET_CACHE);
+    c.header('Content-Type', 'application/speculationrules+json; charset=utf-8');
+    return c.body(JSON.stringify(SPECULATION_RULES));
+  });
 
   app.get(appPath(config, '/healthz'), (c) => {
     c.header('Cache-Control', 'no-store');
@@ -150,17 +152,16 @@ function page(
 }
 
 function staticFiles(config: AppConfig, publicDir: string) {
-  return serveStatic({
-    root: publicDir,
-    onFound: (_path, c) => {
-      c.header('Cache-Control', 'no-cache');
-    },
-    rewriteRequestPath: (requestPath) => {
-      if (config.basePath !== '' && requestPath.startsWith(config.basePath)) {
-        return requestPath.slice(config.basePath.length) || '/';
-      }
-      return requestPath;
-    },
-  });
+  return async (c: Context, next: () => Promise<void>) => {
+    const file = readPublicFile(publicDir, c.req.path, config.basePath);
+    if (!file) return next();
+    const cache = assetCacheControl(c.req.query('v'), publicDir);
+    c.header('Cache-Control', cache);
+    c.header('Content-Type', file.type);
+    if (file.type.startsWith('text/css')) {
+      return c.body(rewriteCssUrls(file.body.toString('utf8'), staticAssetStamp(publicDir)));
+    }
+    return c.body(new Uint8Array(file.body));
+  };
 }
 

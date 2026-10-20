@@ -76,11 +76,11 @@ describe('public pages', () => {
     expect(html).not.toContain('SECRET-PERSON-NOTE');
     expect(html).not.toContain('SECRET-SHIFT-NOTE');
     expect(html).not.toContain('<form');
-    expect(html).toContain('src="/js/desk.js"');
-    expect(html).toContain('src="/js/enhance.js"');
+    expect(html).toContain('src="/js/desk.js?v=');
+    expect(html).toContain('src="/js/enhance.js?v=');
     expect(html).not.toContain('<script>alert(1)</script>');
-    expect(html).toContain('href="/css/app.css"');
-    expect(html).toContain('href="/brand/tokens.css"');
+    expect(html).toContain('href="/css/app.css?v=');
+    expect(html).toContain('href="/brand/tokens.css?v=');
     expect(html).toContain(`href="/s/${ids.open}"`);
     expect(home.headers.get('content-security-policy')).toBe(CONTENT_SECURITY_POLICY);
     expect(home.headers.get('referrer-policy')).toBe('no-referrer');
@@ -186,12 +186,46 @@ describe('public pages', () => {
     const css = await app.request('/css/app.css');
     expect(css.status).toBe(200);
     expect(css.headers.get('content-type')).toContain('text/css');
+    expect(css.headers.get('cache-control')).toBe('public, max-age=3600');
     const stylesheet = await css.text();
     expect(stylesheet).toContain('var(--hope-ink)');
+    expect(stylesheet).toContain('@view-transition');
+    expect(stylesheet).toContain('view-transition-name: site-header');
+    expect(stylesheet).toMatch(/lexend-latin\.woff2\?v=/);
     expect(stylesheet).not.toContain('sunburst');
     const tokens = await app.request('/brand/tokens.css');
     expect(tokens.status).toBe(200);
     expect(await tokens.text()).toContain('--hope-yellow:#f9e194');
+
+    const home = await app.request('/');
+    expect(home.headers.get('cache-control')).toBe('no-store');
+    expect(home.headers.get('speculation-rules')).toBe('"/speculation-rules.json"');
+    const homeHtml = await home.text();
+    const styled = versionedAsset(homeHtml, '/css/app.css');
+    const versioned = await app.request(styled);
+    expect(versioned.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    const font = stylesheet.match(/(\/brand\/fonts\/lexend-latin\.woff2\?v=[A-Za-z0-9_-]+)/);
+    const fontFile = await app.request(font?.[1] ?? '/missing');
+    expect(fontFile.status).toBe(200);
+    expect(fontFile.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(Buffer.from(await fontFile.arrayBuffer()).length).toBeGreaterThan(1000);
+    const logo = await app.request(versionedAsset(homeHtml, '/img/logo.png'));
+    expect(logo.status).toBe(200);
+    expect(logo.headers.get('content-type')).toContain('image/png');
+    const logoBytes = Buffer.from(await logo.arrayBuffer());
+    expect(logoBytes.subarray(0, 4).toString('hex')).toBe('89504e47');
+    expect(logoBytes.length).toBeGreaterThan(1000);
+    const script = await app.request(versionedAsset(homeHtml, '/js/desk.js'));
+    expect(script.status).toBe(200);
+    expect((await script.text()).length).toBeGreaterThan(20);
+
+    const rules = await app.request('/speculation-rules.json');
+    expect(rules.status).toBe(200);
+    expect(rules.headers.get('content-type')).toContain('application/speculationrules+json');
+    const body = await rules.json();
+    expect(body.prefetch[0].eagerness).toBe('moderate');
+    expect(body.prefetch[0].where.and[1].not.selector_matches).toContain('[data-confirm]');
+    expect(body.prefetch[0].where.and[1].not.selector_matches).toContain('[data-open-event]');
   });
 
   it('prefixes routes and assets when the app is mounted at /volunteer', async () => {
@@ -201,8 +235,9 @@ describe('public pages', () => {
     const home = await app.request('/volunteer');
     expect(home.status).toBe(200);
     const html = await home.text();
-    expect(html).toContain('href="/volunteer/css/app.css"');
-    expect(html).toContain('href="/volunteer/brand/tokens.css"');
+    expect(html).toContain('href="/volunteer/css/app.css?v=');
+    expect(html).toContain('href="/volunteer/brand/tokens.css?v=');
+    expect(home.headers.get('speculation-rules')).toBe('"/volunteer/speculation-rules.json"');
     expect(html).toContain('Weekly pantry');
     expect(html).not.toContain('Upcoming shifts');
     expect((await app.request('/volunteer/e/weekly-pantry')).status).toBe(200);
@@ -342,6 +377,13 @@ function insertShift(
     )
     .run(eventId, role, times.startsAtUtc, times.endsAtUtc, capacity, cancelled);
   return Number(result.lastInsertRowid);
+}
+
+function versionedAsset(html: string, file: string): string {
+  const escaped = file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = html.match(new RegExp(`${escaped}\\?v=([A-Za-z0-9_-]+)`));
+  if (!match?.[1]) throw new Error(`Missing versioned asset ${file}`);
+  return `${file}?v=${match[1]}`;
 }
 
 function insertSignup(db: import('better-sqlite3').Database, shiftId: number): void {

@@ -327,7 +327,7 @@ describe('coordinator screens', () => {
     const page = await app.request(`/admin/shifts/${shiftId}`, { headers: { cookie } });
     const html = await page.text();
     expect(html).toContain('Add a walk-in');
-    expect(html).toContain('src="/js/enhance.js"');
+    expect(html).toContain('src="/js/enhance.js?v=');
     expect(html).toContain('data-under-18');
     expect(html).toContain('data-guardian');
     expect(html).not.toMatch(/id="walkin-under-18"[^>]*\schecked/);

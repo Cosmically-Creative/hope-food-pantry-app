@@ -6,12 +6,13 @@ import type { SignupErrors, SignupValues } from './signup-form.js';
 import type { MoveTarget } from './admin/store.js';
 import { ShiftTargetOptions } from './shift-options.js';
 import type { ManageView } from './signup.js';
+import { assetHref } from './static-assets.js';
 import { appPath } from './url.js';
 
 const PANTRY_SITE = 'https://hopefoodpantrysc.org';
 
 function asset(config: AppConfig, file: string): string {
-  return appPath(config, file);
+  return assetHref(config, file);
 }
 
 function pathIs(path: string | undefined, target: string): boolean {
@@ -45,9 +46,9 @@ export function Layout(props: {
         <title>{props.title}</title>
         <link rel="icon" href={asset(props.config, '/img/favicons/favicon.png')} />
         <link rel="apple-touch-icon" href={asset(props.config, '/img/favicons/favicon-apple.png')} />
-        <link rel="stylesheet" href={appPath(props.config, '/brand/tokens.css')} />
-        <link rel="stylesheet" href={appPath(props.config, '/css/app.css')} />
-        <script src={appPath(props.config, '/js/desk.js')} />
+        <link rel="stylesheet" href={asset(props.config, '/brand/tokens.css')} />
+        <link rel="stylesheet" href={asset(props.config, '/css/app.css')} />
+        <script src={asset(props.config, '/js/desk.js')} />
       </head>
       <body>
         <a class="skip-link" href="#content">
@@ -208,7 +209,7 @@ export function Layout(props: {
           </p>
         </footer>
         {props.turnstile ? <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer /> : null}
-        <script src={appPath(props.config, '/js/enhance.js')} defer />
+        <script src={asset(props.config, '/js/enhance.js')} defer />
       </body>
     </html>
   );
