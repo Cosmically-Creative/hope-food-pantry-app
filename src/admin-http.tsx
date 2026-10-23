@@ -301,6 +301,7 @@ function showHome(
       exportError={exportError}
       backupNote={backup.text}
       backupState={backup.state}
+      backupSavedToday={backup.savedToday}
       newEvent={newEvent}
     />,
     { account: session, status },

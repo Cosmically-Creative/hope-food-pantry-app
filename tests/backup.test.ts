@@ -137,21 +137,29 @@ describe('daily database backup', () => {
     expect(describeBackup(root, early)).toEqual({
       state: 'waiting',
       text: 'No database backup has been saved yet.',
+      savedToday: false,
     });
     expect(describeBackup(root, due)).toEqual({
       state: 'behind',
       text: 'No database backup has been saved yet.',
+      savedToday: false,
     });
     writeFileSync(path.join(root, 'daily-2026-06-14.db'), '');
-    expect(describeBackup(root, early).text).toBe('Database backup saved June 14, 2026.');
+    expect(describeBackup(root, early)).toEqual({
+      state: 'saved',
+      text: 'Database backup saved June 14, 2026.',
+      savedToday: false,
+    });
     expect(describeBackup(root, due)).toEqual({
       state: 'behind',
       text: 'Database backup is behind. The newest saved copy is June 14, 2026.',
+      savedToday: false,
     });
     writeFileSync(path.join(root, 'daily-2026-06-15.db'), '');
     expect(describeBackup(root, due)).toEqual({
       state: 'saved',
       text: 'Database backup saved June 15, 2026.',
+      savedToday: true,
     });
     expect(JSON.stringify(describeBackup(root, due))).not.toContain('/');
   });

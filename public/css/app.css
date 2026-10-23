@@ -1248,6 +1248,35 @@ article.shift-card {
   line-height: 1.45;
 }
 
+.desk-note.is-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 1.5rem;
+  padding: 0.28rem 0.7rem 0.28rem 0.5rem;
+  background: #fff;
+  border: 1px solid #e4edf5;
+  box-shadow: none;
+  color: #4a5563;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.desk-note-check {
+  width: 0.8rem;
+  height: 0.8rem;
+  flex: none;
+}
+
+.desk-note-check path {
+  fill: none;
+  stroke: #3b8950;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .event-dialog {
   width: 100%;
   max-width: none;

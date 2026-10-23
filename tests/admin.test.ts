@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -95,6 +95,18 @@ describe('coordinator sign-in', () => {
     expect(homeHtml).toContain('Signed in as <strong>Administrator</strong>');
     expect(homeHtml).toContain('No database backup has been saved yet.');
     expect(homeHtml).not.toContain('coordinator@example.invalid');
+  });
+
+  it('shows a backup from today as a short status tag', async () => {
+    const { app, db, config } = await buildApp();
+    mkdirSync(path.join(config.dataDir, 'backups'), { recursive: true });
+    writeFileSync(path.join(config.dataDir, 'backups', 'daily-2026-10-14.db'), '');
+    const cookie = await signIn(app, db);
+    const home = await app.request('/admin', { headers: { cookie } });
+    const homeHtml = await home.text();
+    expect(homeHtml).toContain('class="desk-note is-saved"');
+    expect(homeHtml).toContain('Backup saved today');
+    expect(homeHtml).not.toContain('Database backup saved');
   });
 
   it('still accepts a valid link after other guesses from the same network', async () => {

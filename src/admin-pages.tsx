@@ -169,6 +169,7 @@ export function AdminHome(props: {
   exportError?: string;
   backupNote: string;
   backupState: 'saved' | 'waiting' | 'behind';
+  backupSavedToday: boolean;
   newEvent?: { values: EventValues; error?: string };
 }) {
   const draft = props.newEvent?.values ?? {
@@ -186,8 +187,8 @@ export function AdminHome(props: {
         <p class="desk-signed">
           Signed in as <strong>{props.name}</strong>.
         </p>
-        <p class="desk-note">
-          <BackupNote text={props.backupNote} />
+        <p class={props.backupSavedToday ? 'desk-note is-saved' : 'desk-note'}>
+          {props.backupSavedToday ? <BackupSavedToday /> : <BackupNote text={props.backupNote} />}
         </p>
       </header>
       <Notice notice={props.notice} />
@@ -1546,6 +1547,17 @@ function LoginForm(props: { config: AppConfig; error?: string }) {
         <div class="cf-turnstile" data-sitekey={props.config.turnstile.siteKey} data-action="login" />
         <button type="submit">Email me a sign-in link</button>
       </form>
+    </>
+  );
+}
+
+function BackupSavedToday() {
+  return (
+    <>
+      <svg class="desk-note-check" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M3.2 8.4 6.4 11.5 12.8 4.8" />
+      </svg>
+      Backup saved today
     </>
   );
 }

@@ -48,6 +48,8 @@ export type BackupResult = {
 export type BackupStatus = {
   state: 'saved' | 'waiting' | 'behind';
   text: string;
+  /** True only when a daily copy exists for today's Central Time date. */
+  savedToday: boolean;
 };
 
 /**
@@ -94,13 +96,13 @@ export function describeBackup(backupsDir: string, now: string): BackupStatus {
   const clock = formatInstantInZone(now, BACKUP_ZONE);
   if (!newest) {
     const state = clock.time24 < BACKUP_LOCAL_TIME ? 'waiting' : 'behind';
-    return { state, text: 'No database backup has been saved yet.' };
+    return { state, text: 'No database backup has been saved yet.', savedToday: false };
   }
   const label = prettyDate(newest);
   const savedToday = newest >= clock.date;
   const savedYesterday = newest >= previousDate(clock.date) && clock.time24 < BACKUP_LOCAL_TIME;
-  if (savedToday || savedYesterday) return { state: 'saved', text: `Database backup saved ${label}.` };
-  return { state: 'behind', text: `Database backup is behind. The newest saved copy is ${label}.` };
+  if (savedToday || savedYesterday) return { state: 'saved', text: `Database backup saved ${label}.`, savedToday };
+  return { state: 'behind', text: `Database backup is behind. The newest saved copy is ${label}.`, savedToday: false };
 }
 
 export function startBackupRunner(
