@@ -19,6 +19,10 @@
     return document.querySelectorAll('input[data-pick="' + name + '"]:checked');
   };
 
+  var boxesFor = function (name) {
+    return document.querySelectorAll('input[data-pick="' + name + '"]');
+  };
+
   var fill = function (link) {
     form.querySelectorAll('[data-picked]').forEach(function (input) {
       input.remove();
@@ -44,21 +48,47 @@
     var pick = link.getAttribute('data-confirm-pick');
     if (!pick) return;
     var chosen = chosenFor(pick);
+    var kept = [];
+    var blocked = 0;
     var weekly = false;
     chosen.forEach(function (box) {
-      var input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = pick + '[]';
-      input.value = box.value;
-      input.setAttribute('data-picked', '');
-      form.appendChild(input);
+      if (box.getAttribute('data-removable') === 'false') {
+        blocked += 1;
+        return;
+      }
+      kept.push(box);
       if (box.getAttribute('data-weekly') === 'true') weekly = true;
     });
-    detail.textContent = chosen.length === 1 ? '1 selected' : chosen.length + ' selected';
-    detail.hidden = false;
     var weeklyNote = text(link, 'data-confirm-note-weekly');
-    if (weekly && weeklyNote) {
-      note.textContent = weeklyNote;
+    var notes = [];
+    if (kept.length === 0 && blocked > 0) {
+      body.textContent = 'Cancel this shift, or wait until it has ended, before removing it.';
+      submit.hidden = true;
+      submit.disabled = true;
+      cancel.textContent = 'Close';
+      chosen.forEach(function (box) {
+        if (box.getAttribute('data-weekly') === 'true') weekly = true;
+      });
+    } else {
+      kept.forEach(function (box) {
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = pick + '[]';
+        input.value = box.value;
+        input.setAttribute('data-picked', '');
+        form.appendChild(input);
+      });
+      if (blocked > 0) notes.push('The others stay until they are cancelled or have ended.');
+    }
+    if (blocked > 0 && kept.length > 0) {
+      detail.textContent = kept.length + ' of ' + chosen.length + ' can be removed';
+    } else {
+      detail.textContent = chosen.length === 1 ? '1 selected' : chosen.length + ' selected';
+    }
+    detail.hidden = false;
+    if (weekly && weeklyNote) notes.push(weeklyNote);
+    if (notes.length > 0) {
+      note.textContent = notes.join(' ');
       note.hidden = false;
     }
   };
@@ -79,10 +109,13 @@
     document.querySelectorAll('[data-pick-all]').forEach(function (all) {
       var name = all.getAttribute('data-pick-all');
       if (!name) return;
-      var boxes = document.querySelectorAll('input[data-pick="' + name + '"]');
-      var checked = chosenFor(name);
-      all.checked = boxes.length > 0 && checked.length === boxes.length;
-      all.indeterminate = checked.length > 0 && checked.length < boxes.length;
+      var boxes = boxesFor(name);
+      var checked = 0;
+      boxes.forEach(function (box) {
+        if (box.checked) checked += 1;
+      });
+      all.checked = boxes.length > 0 && checked === boxes.length;
+      all.indeterminate = checked > 0 && checked < boxes.length;
     });
   };
 
@@ -105,7 +138,7 @@
       var name = all.getAttribute('data-pick-all');
       if (!name) return;
       var checked = all.checked;
-      document.querySelectorAll('input[data-pick="' + name + '"]').forEach(function (box) {
+      boxesFor(name).forEach(function (box) {
         box.checked = checked;
       });
       syncPicks();

@@ -1,5 +1,5 @@
 import { Temporal } from '@js-temporal/polyfill';
-import type { AdminEvent, AdminEventSummary, AdminShift, AdminShiftSummary, AdminTemplate, MoveTarget, RosterPerson } from './admin/store.js';
+import { DESK_WINDOW_DAYS, type AdminEvent, type HomeEvent, type HomeShift, type AdminShift, type AdminShiftSummary, type AdminTemplate, type MoveTarget, type RosterPerson } from './admin/store.js';
 import { spotsSentence } from './schedule.js';
 import type { EventValues, ShiftValues, TemplateValues } from './admin/forms.js';
 import type { SettingsErrors, SettingsForm } from './settings.js';
@@ -14,7 +14,7 @@ import {
   type ContactManualValues,
 } from './contacts.js';
 import type { SignupErrors, SignupValues } from './signup-form.js';
-import { addLocalDays, todayInZone } from './time.js';
+import { addLocalDays, formatInstantInZone, todayInZone } from './time.js';
 import { ShiftTargetOptions } from './shift-options.js';
 import { assetHref } from './static-assets.js';
 import { appPath } from './url.js';
@@ -48,7 +48,8 @@ const PERSON_CANCEL_BODY = 'Cancelling a signup emails them. Their old private l
 const SHIFT_CANCEL_EMPTY = 'No one is signed up. Cancelling closes the shift and does not send email.';
 const SHIFT_CANCEL_STAY = 'The roster stays. After it is empty, the shift can be removed.';
 const SHIFT_ALREADY = 'This shift is already cancelled.';
-const VISIBLE_SHIFT_DAYS = 14;
+const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 const TEMPLATE_END_BODY = 'Ending it stops later weeks from being added. Shifts already on the schedule stay.';
 const TEMPLATE_ENDED_BODY = 'This weekly template has ended. Shifts already on the schedule stay.';
 const TEMPLATE_DELETE_BODY =
@@ -158,10 +159,25 @@ function whenDetail(whenLabel?: string): string | undefined {
   return whenLabel?.replace(/, (\d{1,2}:\d{2})/, '\n$1');
 }
 
+function Crumb(props: { items: { href?: string; label: string }[] }) {
+  return (
+    <nav class="crumb" aria-label="Breadcrumb">
+      {props.items.map((item, index) => (
+        <span class="crumb-part" key={`${index}-${item.label}`}>
+          {index > 0 ? <span aria-hidden="true">›</span> : null}
+          {item.href ? <a href={item.href}>{item.label}</a> : <span aria-current="page">{item.label}</span>}
+        </span>
+      ))}
+    </nav>
+  );
+}
+
 export function AdminHome(props: {
   config: AppConfig;
   name: string;
-  events: AdminEventSummary[];
+  events: HomeEvent[];
+  shifts: HomeShift[];
+  now: string;
   csrf: string;
   notice?: string;
   exportFrom?: string;
@@ -180,57 +196,89 @@ export function AdminHome(props: {
     tz: props.config.defaultTimeZone,
     published: false,
   };
+  const clock = formatInstantInZone(props.now, props.config.defaultTimeZone);
+  const thisMonth = monthBounds(clock.date, 0);
+  const lastMonth = monthBounds(clock.date, -1);
+  const exportFrom = props.exportFrom || thisMonth.from;
+  const exportTo = props.exportTo || thisMonth.to;
+  const preset =
+    exportFrom === thisMonth.from && exportTo === thisMonth.to
+      ? 'this'
+      : exportFrom === lastMonth.from && exportTo === lastMonth.to
+        ? 'last'
+        : 'custom';
+  const openShifts = props.shifts.filter((shift) => !shift.full);
+  const fullShifts = props.shifts.filter((shift) => shift.full);
   return (
     <>
-      <header class="desk-intro">
-        <h1>Coordinator</h1>
-        <p class="desk-signed">
-          Signed in as <strong>{props.name}</strong>.
-        </p>
-        <p class={props.backupSavedToday ? 'desk-note is-saved' : 'desk-note'}>
-          {props.backupSavedToday ? <BackupSavedToday /> : <BackupNote text={props.backupNote} />}
-        </p>
+      <header class="desk-intro desk-home-intro">
+        <div class="desk-home-copy">
+          <h1>Coordinator</h1>
+          <p class="desk-date">{clock.dateLabel}</p>
+          <p class="desk-signed">
+            Signed in as <strong>{props.name}</strong>.
+          </p>
+        </div>
+        <div class="desk-intro-side">
+          <p class={props.backupSavedToday ? 'desk-note is-saved' : 'desk-note'}>
+            {props.backupSavedToday ? <BackupSavedToday /> : <BackupNote text={props.backupNote} />}
+          </p>
+          <nav class="desk-links" aria-label="Coordinator">
+            <a href={appPath(props.config, '/admin/contacts')}>Contacts</a>
+            <a href={appPath(props.config, '/admin/settings')}>Settings</a>
+          </nav>
+        </div>
       </header>
       <Notice notice={props.notice} />
-      <section class="desk-events" aria-labelledby="events-heading">
-        <div class="desk-toolbar">
-          <div class="desk-toolbar-copy">
-            <h2 id="events-heading">Events</h2>
-            <p>Every event is here, including ones that are off the public list.</p>
+      <div class="coordinator-board">
+        <section class="desk-panel" aria-labelledby="needs-heading">
+          <div class="desk-panel-head">
+            <h2 id="needs-heading">Shifts that need volunteers</h2>
+            <p class="desk-panel-aside">Next 2 weeks</p>
           </div>
-          <div class="desk-actions">
-            <a class="btn" href={appPath(props.config, '/admin/events/new')} data-open-event>
-              New event
-            </a>
-            <a class="btn btn-quiet" href={appPath(props.config, '/admin/contacts')}>
-              Contacts
-            </a>
-            <a class="btn btn-quiet" href={appPath(props.config, '/admin/settings')}>
-              Settings
-            </a>
-          </div>
+          {openShifts.length === 0 ? <p class="empty">No open shifts in the next 2 weeks.</p> : <ShiftNeedList config={props.config} shifts={openShifts} today={clock.date} />}
+          {fullShifts.length > 0 ? <FullShiftNotes shifts={fullShifts} /> : null}
+        </section>
+        <div class="desk-split">
+          <section class="desk-panel" aria-labelledby="events-heading">
+            <div class="desk-panel-head">
+              <h2 id="events-heading">Events</h2>
+              <a class="btn" href={appPath(props.config, '/admin/events/new')} data-open-event>
+                New event
+              </a>
+            </div>
+            {props.events.length === 0 ? <p class="empty">No events yet.</p> : <EventList config={props.config} events={props.events} today={clock.date} />}
+          </section>
+          <form method="post" action={appPath(props.config, '/admin/export')} class="signup-form desk-panel desk-download" data-export-range>
+            <input type="hidden" name="csrf" value={props.csrf} />
+            <h2>Download signups</h2>
+            <p class="desk-download-copy">A spreadsheet of everyone signed up for shifts in these dates.</p>
+            {props.exportError ? <p class="error">{props.exportError}</p> : null}
+            <div class="range-presets" role="group" aria-label="Date range">
+              <button type="button" data-range="this" data-from={thisMonth.from} data-to={thisMonth.to} aria-pressed={preset === 'this' ? 'true' : 'false'}>
+                This month
+              </button>
+              <button type="button" data-range="last" data-from={lastMonth.from} data-to={lastMonth.to} aria-pressed={preset === 'last' ? 'true' : 'false'}>
+                Last month
+              </button>
+              <button type="button" data-range="custom" aria-pressed={preset === 'custom' ? 'true' : 'false'}>
+                Custom
+              </button>
+            </div>
+            <div class="desk-fields">
+              <label>
+                From
+                <input name="from" type="date" required value={exportFrom} />
+              </label>
+              <label>
+                To
+                <input name="to" type="date" required value={exportTo} />
+              </label>
+            </div>
+            <button type="submit">Download spreadsheet</button>
+          </form>
         </div>
-        {props.events.length === 0 ? <p class="empty">No events yet.</p> : <EventList config={props.config} events={props.events} />}
-      </section>
-      <form method="post" action={appPath(props.config, '/admin/export')} class="signup-form desk-download">
-        <input type="hidden" name="csrf" value={props.csrf} />
-        <h2>Download signups</h2>
-        <p>
-          Download signups whose shift date falls in this range. The date is the event's local date. A downloaded copy stays on your computer. This app does not delete it later.
-        </p>
-        {props.exportError ? <p class="error">{props.exportError}</p> : null}
-        <div class="desk-range">
-          <label>
-            From
-            <input name="from" type="date" required value={props.exportFrom ?? ''} />
-          </label>
-          <label>
-            To
-            <input name="to" type="date" required value={props.exportTo ?? ''} />
-          </label>
-          <button type="submit">Download this date range</button>
-        </div>
-      </form>
+      </div>
       <dialog id="new-event" class="event-dialog" aria-labelledby="new-event-title" open={props.newEvent ? true : undefined}>
         <div class="event-dialog-card">
           <EventForm
@@ -251,6 +299,7 @@ export function AdminHome(props: {
         </div>
       </dialog>
       <script src={assetHref(props.config, '/js/event-dialog.js')} defer />
+      <script src={assetHref(props.config, '/js/export-range.js')} defer />
     </>
   );
 }
@@ -265,9 +314,7 @@ export function SettingsPage(props: {
   const errors = props.errors ?? {};
   return (
     <>
-      <p>
-        <a href={appPath(props.config, '/admin')}>Coordinator</a>
-      </p>
+      <Crumb items={[{ href: appPath(props.config, '/admin'), label: 'Coordinator' }, { label: 'Settings' }]} />
       <h1>Settings</h1>
       <Notice notice={props.notice} />
       <form method="post" action={appPath(props.config, '/admin/settings')} class="signup-form">
@@ -342,9 +389,7 @@ export function ContactsPage(props: {
   const moreHref = contactListHref(props.config, props.query, props.limit + CONTACT_LIST_PAGE);
   return (
     <>
-      <p>
-        <a href={appPath(props.config, '/admin')}>Coordinator</a>
-      </p>
+      <Crumb items={[{ href: appPath(props.config, '/admin'), label: 'Coordinator' }, { label: 'Contacts' }]} />
       <h1>Contacts</h1>
       {props.summary ? <Notice text={contactImportSentence(props.summary)} /> : <Notice notice={props.notice} />}
       {props.summary && props.summary.skips.length > 0 ? (
@@ -461,9 +506,13 @@ export function ContactPage(props: {
   };
   return (
     <>
-      <p>
-        <a href={appPath(props.config, '/admin/contacts')}>Contacts</a>
-      </p>
+      <Crumb
+        items={[
+          { href: appPath(props.config, '/admin'), label: 'Coordinator' },
+          { href: appPath(props.config, '/admin/contacts'), label: 'Contacts' },
+          { label: props.contact.name },
+        ]}
+      />
       <h1>{props.contact.name}</h1>
       <p>{props.contact.email}</p>
       {props.contact.phone ? <p>{props.contact.phone}</p> : null}
@@ -551,58 +600,77 @@ export function EventEditor(props: {
   submitLabel: string;
   confirm?: ConfirmPrompt;
 }) {
+  const event = props.event;
+  const removal = event
+    ? eventRemovalPrompt({
+        title: event.title,
+        published: event.published,
+        shiftCount: event.shifts.length,
+        templateCount: event.templates.length,
+        signupCount: event.shifts.reduce((sum, shift) => sum + shift.signupCount, 0),
+      })
+    : undefined;
   return (
     <div class="event-page">
-      <header class="desk-intro">
-        <div class="desk-toolbar">
-          <div class="desk-toolbar-copy">
-            <h1>{props.heading}</h1>
-            {props.event ? (
-              <p class="event-status">
-                <span class={props.event.published ? 'event-pill' : 'event-pill is-hidden'}>
-                  {props.event.published ? 'On the public list' : 'Not on the public list'}
-                </span>
-              </p>
-            ) : null}
+      {event ? (
+        <header class="event-head">
+          <Crumb items={[{ href: appPath(props.config, '/admin'), label: 'Coordinator' }, { label: props.heading }]} />
+          <div class="event-titlebar">
+            <div class="event-title">
+              <h1>{props.heading}</h1>
+              <span class={event.published ? 'event-badge is-public' : 'event-badge is-hidden'}>{event.published ? 'Public' : 'Hidden'}</span>
+            </div>
+            <div class="event-actions">
+              {event.published ? (
+                <a class="btn btn-line" href={appPath(props.config, `/e/${encodeURIComponent(event.slug)}`)}>
+                  View public page
+                </a>
+              ) : null}
+              <form method="post" action={appPath(props.config, `/admin/events/${event.id}/export`)}>
+                <input type="hidden" name="csrf" value={props.csrf} />
+                <button type="submit" class="btn btn-line">
+                  Download spreadsheet
+                </button>
+              </form>
+            </div>
           </div>
-          {props.event ? (
-            <form method="post" action={appPath(props.config, `/admin/events/${props.event.id}/export`)} class="desk-inline">
-              <input type="hidden" name="csrf" value={props.csrf} />
-              <button type="submit" class="btn-quiet">
-                Download this event
-              </button>
-            </form>
-          ) : null}
-        </div>
-        {props.event ? <p class="panel-note">A downloaded copy stays on your computer. This app does not delete it later.</p> : null}
-      </header>
+        </header>
+      ) : (
+        <header class="event-head">
+          <h1>{props.heading}</h1>
+        </header>
+      )}
       <Notice notice={props.notice} />
-      {props.event ? (
-        <ShiftList config={props.config} event={props.event} csrf={props.csrf} generateNote={props.generateNote} now={props.now} />
-      ) : null}
-      <section class="desk-events" aria-labelledby="details-heading">
-        <div class="desk-toolbar-copy">
-          <h2 id="details-heading">Event details</h2>
-        </div>
-        <EventForm action={props.action} csrf={props.csrf} values={props.values} error={props.error} submitLabel={props.submitLabel} wide />
-        {props.event ? (
-          <p class="event-remove">
-            <ConfirmAnchor
-              href={appPath(props.config, `/admin/events/${props.event.id}/remove`)}
-              prompt={eventRemovalPrompt({
-                title: props.event.title,
-                published: props.event.published,
-                shiftCount: props.event.shifts.length,
-                templateCount: props.event.templates.length,
-                signupCount: props.event.shifts.reduce((sum, shift) => sum + shift.signupCount, 0),
-              })}
-            >
-              Remove this event
-            </ConfirmAnchor>
+      {event && removal ? (
+        <section class="event-strip" aria-label="Event details">
+          <p class="event-strip-line">
+            <strong>Event details</strong>
+            <span>{event.location.trim() || 'No address yet'}</span>
           </p>
-        ) : null}
-      </section>
-      {props.event ? <ConfirmDialog config={props.config} csrf={props.csrf} prompt={props.confirm} /> : null}
+          <details class="event-edit" open={props.error ? true : undefined}>
+            <summary>
+              Edit details
+              <span class="edit-chevron" aria-hidden="true" />
+            </summary>
+            <EventForm action={props.action} csrf={props.csrf} values={props.values} error={props.error} submitLabel={props.submitLabel} wide />
+          </details>
+        </section>
+      ) : (
+        <EventForm action={props.action} csrf={props.csrf} values={props.values} error={props.error} submitLabel={props.submitLabel} wide />
+      )}
+      {event ? <ShiftList config={props.config} event={event} csrf={props.csrf} generateNote={props.generateNote} now={props.now} /> : null}
+      {event && removal ? (
+        <section class="event-danger" aria-labelledby="remove-event-heading">
+          <div>
+            <h2 id="remove-event-heading">Remove this event</h2>
+            <p>You'll see what affects and confirm before anything is removed.</p>
+          </div>
+          <ConfirmAnchor class="btn btn-danger" href={appPath(props.config, `/admin/events/${event.id}/remove`)} prompt={removal}>
+            Remove event...
+          </ConfirmAnchor>
+        </section>
+      ) : null}
+      {event ? <ConfirmDialog config={props.config} csrf={props.csrf} prompt={props.confirm} /> : null}
     </div>
   );
 }
@@ -614,15 +682,20 @@ export function TemplateEditor(props: {
   csrf: string;
   values: TemplateValues;
   eventId: number;
+  eventTitle: string;
   ended?: boolean;
   error?: string;
   submitLabel: string;
 }) {
   return (
     <>
-      <p>
-        <a href={appPath(props.config, `/admin/events/${props.eventId}`)}>Back to the event</a>
-      </p>
+      <Crumb
+        items={[
+          { href: appPath(props.config, '/admin'), label: 'Coordinator' },
+          { href: appPath(props.config, `/admin/events/${props.eventId}`), label: props.eventTitle },
+          { label: props.heading },
+        ]}
+      />
       <h1>{props.heading}</h1>
       {props.ended ? (
         <>
@@ -647,11 +720,20 @@ export function ShiftEditor(props: {
   action: string;
   csrf: string;
   values: ShiftValues;
+  eventId: number;
+  eventTitle: string;
   error?: string;
   submitLabel: string;
 }) {
   return (
     <div class="event-page">
+      <Crumb
+        items={[
+          { href: appPath(props.config, '/admin'), label: 'Coordinator' },
+          { href: appPath(props.config, `/admin/events/${props.eventId}`), label: props.eventTitle },
+          { label: 'New shift' },
+        ]}
+      />
       <header class="desk-intro">
         <div class="desk-toolbar-copy">
           <h1 id="new-shift-heading">
@@ -679,18 +761,28 @@ export function ShiftRoster(props: {
   removable?: boolean;
   moves?: { targets: MoveTarget[]; tokens: Record<number, string> };
   confirm?: ConfirmPrompt;
+  editError?: string;
 }) {
   const cancelledPeople = props.shift.people.filter((person) => person.status === 'cancelled');
   const confirmed = props.shift.people.filter((person) => person.status === 'confirmed').length;
+  const formError = props.shift.cancelled ? undefined : props.editError;
+  const bannerError = props.error ?? (props.shift.cancelled ? props.editError : undefined);
+  const detailLine = props.shift.cancelled ? 'Cancelled. The roster stays until you remove it.' : props.shift.whenLabel;
   return (
     <div class="event-page">
+      <Crumb
+        items={[
+          { href: appPath(props.config, '/admin'), label: 'Coordinator' },
+          { href: appPath(props.config, `/admin/events/${props.shift.eventId}`), label: props.shift.eventTitle },
+          { label: props.shift.role },
+        ]}
+      />
       <header class="desk-intro">
         <div class="desk-toolbar">
           <div class="desk-toolbar-copy">
             <h1>{props.shift.role}</h1>
             <p class="event-status">
               <span class="shift-when">{props.shift.eventTitle}</span>
-              <span class="shift-when">{props.shift.whenLabel}</span>
               <span class={spotClass(props.shift)}>{spotLabel(props.shift)}</span>
             </p>
           </div>
@@ -705,7 +797,22 @@ export function ShiftRoster(props: {
         {props.shift.location ? <p class="panel-note">{props.shift.location}</p> : null}
       </header>
       <Notice notice={props.notice} />
-      {props.error ? <p class="error">{props.error}</p> : null}
+      {bannerError ? <p class="error">{bannerError}</p> : null}
+      <section class="event-strip" aria-label="Shift details">
+        <p class="event-strip-line">
+          <strong>Shift details</strong>
+          <span>{detailLine}</span>
+        </p>
+        {props.shift.cancelled ? null : (
+          <details class="event-edit" open={formError ? true : undefined}>
+            <summary>
+              Edit details
+              <span class="edit-chevron" aria-hidden="true" />
+            </summary>
+            <ShiftEditorForm config={props.config} csrf={props.csrf} shift={props.shift} error={formError} />
+          </details>
+        )}
+      </section>
       <section class="desk-events" aria-labelledby="roster-heading">
         <div class="desk-toolbar">
           <div class="desk-toolbar-copy">
@@ -748,50 +855,38 @@ export function ShiftRoster(props: {
       ) : props.walkInNote ? (
         <p class="panel-note">{props.walkInNote}</p>
       ) : null}
-      <section class="desk-events" aria-labelledby="shift-edit-heading">
-        {props.shift.cancelled ? (
-          <>
-            <div class="desk-toolbar-copy">
-              <h2 id="shift-edit-heading">This shift</h2>
-            </div>
-            <p class="panel-note">This shift is cancelled. The roster stays until you remove it.</p>
-          </>
-        ) : (
-          <ShiftEditorForm config={props.config} csrf={props.csrf} shift={props.shift} />
+      <div class="desk-actions">
+        {props.shift.cancelled ? null : (
+          <ConfirmAnchor
+            class="btn btn-quiet"
+            href={appPath(props.config, `/admin/shifts/${props.shift.id}/cancel`)}
+            prompt={shiftCancelPrompt({
+              role: props.shift.role,
+              whenLabel: props.shift.whenLabel,
+              cancelled: false,
+              confirmed,
+            })}
+          >
+            Cancel this shift
+          </ConfirmAnchor>
         )}
-        <div class="desk-actions">
-          {props.shift.cancelled ? null : (
-            <ConfirmAnchor
-              class="btn btn-quiet"
-              href={appPath(props.config, `/admin/shifts/${props.shift.id}/cancel`)}
-              prompt={shiftCancelPrompt({
-                role: props.shift.role,
-                whenLabel: props.shift.whenLabel,
-                cancelled: false,
-                confirmed,
-              })}
-            >
-              Cancel this shift
-            </ConfirmAnchor>
-          )}
-          {props.removable ? (
-            <ConfirmAnchor
-              class="btn btn-quiet"
-              href={appPath(props.config, `/admin/shifts/${props.shift.id}/remove`)}
-              prompt={shiftRemovalPrompt({
-                role: props.shift.role,
-                whenLabel: props.shift.whenLabel,
-                signupCount: props.shift.signupCount,
-                weeklyActive: props.shift.weeklyActive,
-                cancelled: props.shift.cancelled,
-                ended: true,
-              })}
-            >
-              Remove this shift
-            </ConfirmAnchor>
-          ) : null}
-        </div>
-      </section>
+        {props.removable ? (
+          <ConfirmAnchor
+            class="btn btn-quiet"
+            href={appPath(props.config, `/admin/shifts/${props.shift.id}/remove`)}
+            prompt={shiftRemovalPrompt({
+              role: props.shift.role,
+              whenLabel: props.shift.whenLabel,
+              signupCount: props.shift.signupCount,
+              weeklyActive: props.shift.weeklyActive,
+              cancelled: props.shift.cancelled,
+              ended: true,
+            })}
+          >
+            Remove this shift
+          </ConfirmAnchor>
+        ) : null}
+      </div>
       <ConfirmDialog config={props.config} csrf={props.csrf} prompt={props.confirm} />
     </div>
   );
@@ -831,26 +926,96 @@ export function MessagePage(props: { heading: string; message: string }) {
 export const ACCEPTED =
   'If this address belongs to an active coordinator, a sign-in link is queued. It expires in 15 minutes. Opening the link does not sign you in.';
 
-function EventList(props: { config: AppConfig; events: AdminEventSummary[] }) {
+function EventList(props: { config: AppConfig; events: HomeEvent[]; today: string }) {
   return (
-    <ul class="event-board">
+    <ul class="desk-rows">
       {props.events.map((event) => (
         <li key={event.id}>
-          <a class="event-card" href={appPath(props.config, `/admin/events/${event.id}`)}>
-            <span class="event-card-title">{event.title}</span>
-            <span class="event-card-foot">
-              <span class={event.published ? 'event-pill' : 'event-pill is-hidden'}>
-                {event.published ? 'On the public list' : 'Not on the public list'}
-              </span>
-              <span class="event-count">
-                {event.shiftCount} {event.shiftCount === 1 ? 'shift' : 'shifts'}
-              </span>
+          <a class="desk-row" href={appPath(props.config, `/admin/events/${event.id}`)}>
+            <span class="desk-row-copy">
+              <strong>{event.title}</strong>
+              <span>{eventSummary(event, props.today)}</span>
             </span>
+            <span class={event.published ? 'need-pill is-public' : 'need-pill is-hidden'}>{event.published ? 'Public' : 'Hidden'}</span>
           </a>
         </li>
       ))}
     </ul>
   );
+}
+
+function ShiftNeedList(props: { config: AppConfig; shifts: HomeShift[]; today: string }) {
+  return (
+    <ul class="desk-rows">
+      {props.shifts.map((shift) => {
+        const need = needCopy(shift.occupied, shift.capacity);
+        return (
+          <li key={shift.id}>
+            <a class="desk-row" href={appPath(props.config, `/admin/shifts/${shift.id}`)}>
+              <span class="desk-row-main">
+                <span class="desk-row-when">{shiftWhen(shift.date, shift.timeLabel, props.today)}</span>
+                <span class="desk-row-copy">
+                  <strong>{shift.role}</strong>
+                  <span>{shift.eventTitle}</span>
+                </span>
+              </span>
+              <span class={need.tone === 'needs' ? 'need-pill is-needs' : 'need-pill is-open'}>{need.text}</span>
+            </a>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function FullShiftNotes(props: { shifts: HomeShift[] }) {
+  return (
+    <ul class="desk-full">
+      {props.shifts.map((shift) => (
+        <li key={shift.id}>
+          <svg class="desk-full-check" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M3.2 8.4 6.4 11.5 12.8 4.8" />
+          </svg>
+          {shortDate(shift.date)} {shift.role} is full.
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function eventSummary(event: HomeEvent, today: string): string {
+  const count = event.shiftCount === 1 ? '1 shift' : `${event.shiftCount} shifts`;
+  if (!event.nextShift) return event.shiftCount === 0 ? 'No shifts yet' : count;
+  const when = event.nextShift.date === today ? `today at ${event.nextShift.timeLabel}` : `${shortDate(event.nextShift.date)} at ${event.nextShift.timeLabel}`;
+  return `Next shift ${when} · ${count}`;
+}
+
+function needCopy(occupied: number, capacity: number): { text: string; tone: 'open' | 'needs' } {
+  const filled = Math.min(capacity, Math.max(0, occupied));
+  const open = Math.max(0, capacity - filled);
+  const needs = open * 2 > capacity;
+  return {
+    tone: needs ? 'needs' : 'open',
+    text: needs ? `Needs ${open} · ${filled} of ${capacity}` : `${open} open · ${filled} of ${capacity}`,
+  };
+}
+
+function shiftWhen(date: string, timeLabel: string, today: string): string {
+  if (date === today) return `Today, ${timeLabel}`;
+  return `${shortDate(date)}, ${timeLabel}`;
+}
+
+function shortDate(date: string): string {
+  const plain = Temporal.PlainDate.from(date);
+  const weekday = SHORT_WEEKDAYS[plain.dayOfWeek % 7] ?? 'Day';
+  const month = SHORT_MONTHS[plain.month - 1] ?? 'Month';
+  return `${weekday}, ${month} ${plain.day}`;
+}
+
+function monthBounds(today: string, offset: number): { from: string; to: string } {
+  const start = Temporal.PlainDate.from(today).with({ day: 1 }).add({ months: offset });
+  const end = start.add({ months: 1 }).subtract({ days: 1 });
+  return { from: start.toString(), to: end.toString() };
 }
 
 function ConfirmAnchor(props: { href: string; class?: string; prompt: Omit<ConfirmPrompt, 'action'>; children: string }) {
@@ -929,128 +1094,154 @@ function joinAnd(parts: string[]): string {
 
 function ShiftList(props: { config: AppConfig; event: AdminEvent; csrf: string; generateNote?: string; now?: string }) {
   const now = props.now;
-  const removableCount = now ? props.event.shifts.filter((shift) => shift.cancelled || shift.endsAtUtc <= now).length : 0;
+  const today = now ? todayInZone(props.event.tz, Temporal.Instant.from(now)) : '';
   const blocks = shiftListBlocks(props.event.shifts, props.event.tz, props.now);
+  const tail = blocks[blocks.length - 1];
+  const footerMore = tail?.kind === 'more' ? tail : undefined;
+  const body = footerMore ? blocks.slice(0, -1) : blocks;
   return (
     <>
-      <section class="desk-events" aria-labelledby="shifts-heading">
-        <div class="desk-toolbar">
-          <div class="desk-toolbar-copy">
-            <h2 id="shifts-heading">Shifts</h2>
+      <section class="event-panel" aria-labelledby="shifts-heading">
+        <div class="event-panel-head">
+          <div class="event-panel-title">
+            <h2 id="shifts-heading">Upcoming shifts</h2>
+            <details class="help-tip">
+              <summary aria-label="About upcoming shifts">?</summary>
+              <p>
+                Shifts show on the public list when this event is public, the shift is not cancelled, and it has not ended. Repeating shifts add dates for the next eight weeks. Add weekly shifts fills those dates. Shifts already on the schedule stay as they are, including cancelled ones.
+              </p>
+            </details>
           </div>
-          <div class="desk-actions">
+          <div class="event-panel-tools">
             <a class="btn" href={appPath(props.config, `/admin/events/${props.event.id}/shifts/new`)}>
               Add a shift
             </a>
-            <form method="post" action={appPath(props.config, `/admin/events/${props.event.id}/generate`)} class="desk-inline">
-              <input type="hidden" name="csrf" value={props.csrf} />
-              <button type="submit" class="btn-quiet">
-                Add weekly shifts
-              </button>
-            </form>
-          </div>
-        </div>
-        <p class="panel-note">
-          Shifts show on the public list when this event is public, the shift is not cancelled, and it has not ended. Weekly templates add their shifts for the next eight weeks. Shifts already on the schedule stay as they are, including cancelled ones.
-        </p>
-        {props.generateNote ? <p class="error">{props.generateNote}</p> : null}
-        {removableCount > 0 ? (
-          <div class="desk-actions pick-bar">
-            {removableCount > 1 ? (
+            {props.event.shifts.length > 1 ? (
               <label class="pick-all">
                 <input type="checkbox" data-pick-all="shift" />
-                All removable
+                Select all
               </label>
             ) : null}
-            <MassRemove
-              pick="shift"
-              action={appPath(props.config, `/admin/events/${props.event.id}/shifts/remove`)}
-              title="Remove selected shifts"
-              body={SHIFT_DELETE_BODY}
-              submit="Remove selected"
-              note={SHIFT_WEEKLY_NOTE}
-            >
-              Remove selected
-            </MassRemove>
+            {props.event.shifts.length > 0 ? (
+              <MassRemove
+                pick="shift"
+                action={appPath(props.config, `/admin/events/${props.event.id}/shifts/remove`)}
+                title="Remove selected shifts"
+                body={SHIFT_DELETE_BODY}
+                submit="Remove selected"
+                note={SHIFT_WEEKLY_NOTE}
+              >
+                Remove selected
+              </MassRemove>
+            ) : null}
           </div>
-        ) : null}
+        </div>
         {blocks.length === 0 ? (
           <p class="empty">No shifts yet.</p>
         ) : (
-          <ul class="event-board">
-            {blocks.map((block) =>
-              block.kind === 'shift' ? (
-                <ShiftCard key={block.shift.id} config={props.config} shift={block.shift} now={props.now} />
-              ) : (
-                <li key={`more-${block.shifts[0]?.id ?? 'later'}`}>
-                  <details class="shift-more">
-                    <summary>
-                      <span class="shift-more-closed">
-                        See {block.shifts.length} more {block.shifts.length === 1 ? 'shift' : 'shifts'}
-                      </span>
-                      <span class="shift-more-open">Show fewer</span>
-                    </summary>
-                    <ul class="event-board">
-                      {block.shifts.map((shift) => (
-                        <ShiftCard key={shift.id} config={props.config} shift={shift} now={props.now} />
-                      ))}
-                    </ul>
-                  </details>
-                </li>
-              ),
-            )}
-          </ul>
+          <>
+            <ul class="shift-lines">
+              {body.map((block) =>
+                block.kind === 'shift' ? (
+                  <ShiftLine key={block.shift.id} config={props.config} shift={block.shift} now={props.now} today={today} />
+                ) : (
+                  <li key={`more-${block.shifts[0]?.id ?? 'later'}`}>
+                    <ShiftMore config={props.config} shifts={block.shifts} now={props.now} today={today} />
+                  </li>
+                ),
+              )}
+            </ul>
+            <div class="shift-tail">
+              {footerMore ? <ShiftMore config={props.config} shifts={footerMore.shifts} now={props.now} today={today} /> : null}
+              <FillLegend />
+            </div>
+          </>
         )}
       </section>
-      <WeeklyTemplates config={props.config} event={props.event} />
+      <WeeklyTemplates config={props.config} event={props.event} csrf={props.csrf} generateNote={props.generateNote} />
     </>
   );
 }
 
-function ShiftCard(props: { config: AppConfig; shift: AdminShiftSummary; now?: string }) {
+function ShiftMore(props: { config: AppConfig; shifts: AdminShiftSummary[]; now?: string; today: string }) {
+  const count = props.shifts.length;
+  return (
+    <details class="shift-more">
+      <summary>
+        <span class="shift-more-closed">
+          Show {count} more {count === 1 ? 'shift' : 'shifts'}
+        </span>
+        <span class="shift-more-open">Show fewer</span>
+      </summary>
+      <ul class="shift-lines">
+        {props.shifts.map((shift) => (
+          <ShiftLine key={shift.id} config={props.config} shift={shift} now={props.now} today={props.today} />
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function FillLegend() {
+  return (
+    <ul class="fill-legend">
+      <li>
+        <span class="fill-dot is-full" aria-hidden="true" />
+        Full
+      </li>
+      <li>
+        <span class="fill-dot is-open" aria-hidden="true" />
+        Some spots open
+      </li>
+      <li>
+        <span class="fill-dot is-needs" aria-hidden="true" />
+        Less than half filled
+      </li>
+    </ul>
+  );
+}
+
+function ShiftLine(props: { config: AppConfig; shift: AdminShiftSummary; now?: string; today: string }) {
   const shift = props.shift;
   const removable = props.now ? shift.cancelled || shift.endsAtUtc <= props.now : false;
-  const summary = (
-    <>
-      <span class="event-card-title">{shift.role}</span>
-      <span class="event-card-foot">
-        <span class="shift-when">{shift.whenLabel}</span>
-        <span class={spotClass(shift)}>{spotLabel(shift)}</span>
-      </span>
-    </>
-  );
+  const date = shiftDateParts(shift.date);
+  const fill = fillStatus(shift);
   return (
-    <li>
-      {removable ? (
-        <div class="event-card">
-          <label class="pick">
-            <input type="checkbox" data-pick="shift" value={String(shift.id)} data-weekly={shift.weeklyActive ? 'true' : undefined} />
-            <span class="sr-only">Select {shift.role}</span>
-          </label>
-          <a class="shift-open" href={appPath(props.config, `/admin/shifts/${shift.id}`)}>
-            {summary}
-          </a>
-          <ConfirmAnchor
-            class="shift-remove"
-            href={appPath(props.config, `/admin/shifts/${shift.id}/remove`)}
-            prompt={shiftRemovalPrompt({
-              role: shift.role,
-              whenLabel: shift.whenLabel,
-              signupCount: shift.signupCount,
-              weeklyActive: shift.weeklyActive,
-              cancelled: shift.cancelled,
-              ended: true,
-            })}
-          >
-            Remove
-          </ConfirmAnchor>
-        </div>
-      ) : (
-        <a class="event-card" href={appPath(props.config, `/admin/shifts/${shift.id}`)}>
-          {summary}
-        </a>
-      )}
+    <li class="shift-line is-pick">
+      <label class="pick">
+        <input
+          type="checkbox"
+          data-pick="shift"
+          data-removable={removable ? 'true' : 'false'}
+          value={String(shift.id)}
+          data-weekly={shift.weeklyActive ? 'true' : undefined}
+        />
+        <span class="sr-only">Select {shift.role}</span>
+      </label>
+      <a class="shift-line-link" href={appPath(props.config, `/admin/shifts/${shift.id}`)}>
+        <span class="shift-date">
+          <span class="shift-dow">{date.weekday}</span>
+          <span class="shift-num">{date.day}</span>
+          <span class="shift-mon">{date.month}</span>
+        </span>
+        <span class="shift-copy">
+          <strong>{shift.role}</strong>
+          <span>{shiftClockLine(shift, props.today)}</span>
+        </span>
+        <span class={`fill-pill is-${fill.tone}`}>
+          {fill.tone === 'full' ? <FillCheck /> : null}
+          {fill.text}
+        </span>
+      </a>
     </li>
+  );
+}
+
+function FillCheck() {
+  return (
+    <svg class="fill-check" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M3.2 8.4 6.4 11.5 12.8 4.8" />
+    </svg>
   );
 }
 
@@ -1058,7 +1249,7 @@ type ShiftListBlock = { kind: 'shift'; shift: AdminShiftSummary } | { kind: 'mor
 
 function shiftListBlocks(shifts: AdminShiftSummary[], timeZone: string, now?: string): ShiftListBlock[] {
   if (!now) return shifts.map((shift) => ({ kind: 'shift', shift }));
-  const cutoff = addLocalDays(todayInZone(timeZone, Temporal.Instant.from(now)), VISIBLE_SHIFT_DAYS);
+  const cutoff = addLocalDays(todayInZone(timeZone, Temporal.Instant.from(now)), DESK_WINDOW_DAYS);
   const blocks: ShiftListBlock[] = [];
   let later: AdminShiftSummary[] = [];
   const flush = () => {
@@ -1089,30 +1280,33 @@ function shiftListBlocks(shifts: AdminShiftSummary[], timeZone: string, now?: st
   return blocks;
 }
 
-function WeeklyTemplates(props: { config: AppConfig; event: AdminEvent }) {
+function WeeklyTemplates(props: { config: AppConfig; event: AdminEvent; csrf: string; generateNote?: string }) {
   return (
-    <section class="desk-events" aria-labelledby="templates-heading">
-      <div class="desk-toolbar">
-          <div class="desk-toolbar-copy">
-            <h2 id="templates-heading">Weekly templates</h2>
-          </div>
-          <div class="desk-actions">
-            <a class="btn" href={appPath(props.config, `/admin/events/${props.event.id}/templates/new`)}>
-              Add a weekly template
-            </a>
-          </div>
+    <section class="event-panel" aria-labelledby="templates-heading">
+      <div class="event-panel-head">
+        <div>
+          <h2 id="templates-heading">Repeating shifts</h2>
+          <p class="event-panel-note">
+            Each one adds 8 weeks ahead.{' '}
+            <button type="submit" class="text-action" form="add-weekly">
+              Add weekly shifts
+            </button>
+          </p>
         </div>
-        <p class="panel-note">
-          A weekly template repeats one role. Saving or ending it does not change shifts already on the schedule. Ending it stops later weeks from being added.
-        </p>
+        <a class="btn btn-line" href={appPath(props.config, `/admin/events/${props.event.id}/templates/new`)}>
+          Add a repeating shift
+        </a>
+      </div>
+      <form id="add-weekly" method="post" action={appPath(props.config, `/admin/events/${props.event.id}/generate`)} hidden>
+        <input type="hidden" name="csrf" value={props.csrf} />
+      </form>
+      {props.generateNote ? <p class="error">{props.generateNote}</p> : null}
       {props.event.templates.length === 0 ? (
-        <p class="empty">No weekly template yet.</p>
+        <p class="empty">No repeating shifts yet.</p>
       ) : (
-        <ul class="event-board">
+        <ul class="repeat-lines">
           {props.event.templates.map((template) => (
-            <li class="shift-row" key={template.id}>
-              <TemplateCard config={props.config} eventId={props.event.id} template={template} />
-            </li>
+            <TemplateCard key={template.id} config={props.config} eventId={props.event.id} template={template} />
           ))}
         </ul>
       )}
@@ -1120,59 +1314,43 @@ function WeeklyTemplates(props: { config: AppConfig; event: AdminEvent }) {
   );
 }
 
-function TemplateSummary(props: { template: AdminTemplate; ended?: boolean }) {
-  const template = props.template;
-  const range = template.endsOn ? `from ${template.startsOn} through ${template.endsOn}` : `from ${template.startsOn}`;
-  return (
-    <>
-      <span class="event-card-title">
-        {weekdayName(template.weekday)}, {template.role}
-      </span>
-      <span class="event-card-foot">
-        <span class="shift-when">
-          {clockLabel(template.start)} to {clockLabel(template.end)}, {range}
-        </span>
-        <span class="event-pill">
-          {template.capacity} {template.capacity === 1 ? 'spot' : 'spots'}
-        </span>
-        {props.ended ? <span class="event-pill is-hidden">Ended</span> : null}
-      </span>
-    </>
-  );
-}
-
 function TemplateCard(props: { config: AppConfig; eventId: number; template: AdminTemplate }) {
   const template = props.template;
+  const spots = template.capacity === 1 ? '1 spot' : `${template.capacity} spots`;
+  const when = template.endsOn ? `${mediumDate(template.startsOn)} to ${mediumDate(template.endsOn)}` : `since ${mediumDate(template.startsOn)}`;
   return (
-    <>
+    <li class="repeat-line">
+      <span class="repeat-copy">
+        <strong>
+          Every {weekdayName(template.weekday)} · {template.role}
+        </strong>
+        <span>
+          {timeRange(template.start, template.end)} · {spots} · {when}
+          {template.active ? '' : ' · ended'}
+        </span>
+      </span>
       {template.active ? (
-        <>
-          <a class="event-card" href={appPath(props.config, `/admin/events/${props.eventId}/templates/${template.id}`)}>
-            <TemplateSummary template={template} />
-          </a>
-          <ConfirmAnchor
-            class="btn btn-quiet"
-            href={appPath(props.config, `/admin/events/${props.eventId}/templates/${template.id}/end`)}
-            prompt={templateEndPrompt(template)}
-          >
-            End
-          </ConfirmAnchor>
-        </>
-      ) : (
-        <>
-          <div class="event-card is-static">
-            <TemplateSummary template={template} ended />
-          </div>
-          <ConfirmAnchor
-            class="btn btn-quiet"
-            href={appPath(props.config, `/admin/events/${props.eventId}/templates/${template.id}/remove`)}
-            prompt={templateRemovalPrompt(template)}
-          >
-            Remove
-          </ConfirmAnchor>
-        </>
-      )}
-    </>
+        <a class="btn btn-line" href={appPath(props.config, `/admin/events/${props.eventId}/templates/${template.id}`)}>
+          Edit
+        </a>
+      ) : null}
+      <details class="more-menu">
+        <summary aria-label={`More actions for ${template.role}`}>
+          <span aria-hidden="true">⋯</span>
+        </summary>
+        <div class="more-menu-pop">
+          {template.active ? (
+            <ConfirmAnchor href={appPath(props.config, `/admin/events/${props.eventId}/templates/${template.id}/end`)} prompt={templateEndPrompt(template)}>
+              End
+            </ConfirmAnchor>
+          ) : (
+            <ConfirmAnchor href={appPath(props.config, `/admin/events/${props.eventId}/templates/${template.id}/remove`)} prompt={templateRemovalPrompt(template)}>
+              Remove
+            </ConfirmAnchor>
+          )}
+        </div>
+      </details>
+    </li>
   );
 }
 
@@ -1279,11 +1457,12 @@ function EventForm(props: {
   );
 }
 
-function ShiftForm(props: { action: string; csrf: string; values: ShiftValues; error?: string; submitLabel: string; plain?: boolean }) {
+function ShiftForm(props: { action: string; csrf: string; values: ShiftValues; error?: string; note?: string; submitLabel: string; plain?: boolean }) {
   return (
     <form method="post" action={props.action} class={props.plain ? 'signup-form event-details-form' : 'signup-form'}>
       <input type="hidden" name="csrf" value={props.csrf} />
       {props.error ? <p class="error">{props.error}</p> : null}
+      {props.note ? <p class="event-panel-note">{props.note}</p> : null}
       <label>
         Role
         <input name="role" type="text" required value={props.values.role} />
@@ -1309,27 +1488,23 @@ function ShiftForm(props: { action: string; csrf: string; values: ShiftValues; e
   );
 }
 
-function ShiftEditorForm(props: { config: AppConfig; csrf: string; shift: AdminShift }) {
+function ShiftEditorForm(props: { config: AppConfig; csrf: string; shift: AdminShift; error?: string }) {
   return (
-    <>
-      <div class="desk-toolbar-copy">
-        <h2 id="shift-edit-heading">Edit this shift</h2>
-      </div>
-      <p class="panel-note">Changing the role, date, or time emails everyone who is signed up and replaces their private links.</p>
-      <ShiftForm
-        action={appPath(props.config, `/admin/shifts/${props.shift.id}`)}
-        csrf={props.csrf}
-        submitLabel="Save shift"
-        plain
-        values={{
-          role: props.shift.role,
-          date: props.shift.date,
-          start: props.shift.start,
-          end: props.shift.end,
-          capacity: String(props.shift.capacity),
-        }}
-      />
-    </>
+    <ShiftForm
+      action={appPath(props.config, `/admin/shifts/${props.shift.id}`)}
+      csrf={props.csrf}
+      error={props.error}
+      note="Changing the role, date, or time emails everyone who is signed up and replaces their private links."
+      submitLabel="Save shift"
+      plain
+      values={{
+        role: props.shift.role,
+        date: props.shift.date,
+        start: props.shift.start,
+        end: props.shift.end,
+        capacity: String(props.shift.capacity),
+      }}
+    />
   );
 }
 
@@ -1659,10 +1834,53 @@ function weekdayName(weekday: number): string {
 }
 
 function clockLabel(time: string): string {
+  const parts = clockParts(time);
+  if (!parts) return time;
+  return `${parts.hour}:${parts.minute} ${parts.suffix}`;
+}
+
+function clockParts(time: string): { hour: number; minute: string; suffix: string } | null {
   const match = /^([01][0-9]|2[0-3]):([0-5][0-9])$/.exec(time);
-  if (!match) return time;
-  const hour = Number(match[1]);
-  const suffix = hour < 12 ? 'AM' : 'PM';
-  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
-  return `${hour12}:${match[2]} ${suffix}`;
+  const hourText = match?.[1];
+  const minute = match?.[2];
+  if (!hourText || !minute) return null;
+  const hour24 = Number(hourText);
+  return { hour: hour24 % 12 === 0 ? 12 : hour24 % 12, minute, suffix: hour24 < 12 ? 'AM' : 'PM' };
+}
+
+function timeRange(start: string, end: string): string {
+  const from = clockParts(start);
+  const to = clockParts(end);
+  if (!from || !to) return `${clockLabel(start)} to ${clockLabel(end)}`;
+  if (from.suffix === to.suffix) return `${from.hour}:${from.minute} to ${to.hour}:${to.minute} ${to.suffix}`;
+  return `${from.hour}:${from.minute} ${from.suffix} to ${to.hour}:${to.minute} ${to.suffix}`;
+}
+
+function shiftDateParts(date: string): { weekday: string; day: string; month: string } {
+  const plain = Temporal.PlainDate.from(date);
+  return {
+    weekday: (SHORT_WEEKDAYS[plain.dayOfWeek % 7] ?? 'Day').toUpperCase(),
+    day: String(plain.day),
+    month: SHORT_MONTHS[plain.month - 1] ?? 'Month',
+  };
+}
+
+function mediumDate(date: string): string {
+  const plain = Temporal.PlainDate.from(date);
+  const month = SHORT_MONTHS[plain.month - 1] ?? 'Month';
+  return `${month} ${plain.day}, ${plain.year}`;
+}
+
+function shiftClockLine(shift: Pick<AdminShiftSummary, 'date' | 'start' | 'end'>, today: string): string {
+  const range = timeRange(shift.start, shift.end);
+  return shift.date === today ? `Today · ${range}` : range;
+}
+
+function fillStatus(shift: Pick<AdminShiftSummary, 'capacity' | 'occupied' | 'cancelled'>): { tone: 'full' | 'open' | 'needs' | 'cancelled'; text: string } {
+  if (shift.cancelled) return { tone: 'cancelled', text: 'Cancelled' };
+  const filled = Math.min(shift.capacity, Math.max(0, shift.occupied));
+  const open = Math.max(0, shift.capacity - filled);
+  if (open === 0) return { tone: 'full', text: `Full · ${filled} of ${shift.capacity}` };
+  if (open * 2 > shift.capacity) return { tone: 'needs', text: `Needs ${open} · ${filled} of ${shift.capacity}` };
+  return { tone: 'open', text: `${open} open · ${filled} of ${shift.capacity}` };
 }

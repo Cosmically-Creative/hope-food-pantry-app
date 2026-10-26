@@ -32,7 +32,7 @@ import {
   getAdminEvent,
   getAdminShift,
   getAdminTemplate,
-  listAdminEvents,
+  listHomeBoard,
   readEventRemoval,
   readShiftRemoval,
   readSignupRemoval,
@@ -285,7 +285,9 @@ function showHome(
   const session = requireSession(c, services);
   if (session instanceof Response) return session;
   const notice = knownNotice(c.req.query('notice'));
-  const backup = describeBackup(backupDirectory(services.config.dataDir), services.now());
+  const now = services.now();
+  const backup = describeBackup(backupDirectory(services.config.dataDir), now);
+  const board = listHomeBoard(services.db, now, services.config.defaultTimeZone);
   return html(
     c,
     services,
@@ -293,7 +295,9 @@ function showHome(
     <AdminHome
       config={services.config}
       name={session.name}
-      events={listAdminEvents(services.db)}
+      events={board.events}
+      shifts={board.shifts}
+      now={now}
       csrf={session.csrf}
       notice={notice}
       exportFrom={range?.from}
@@ -779,6 +783,7 @@ function showNewTemplate(c: Context, services: AdminServices, values?: TemplateV
       csrf={session.csrf}
       values={values ?? blankTemplate(localToday(event.tz, services.now()))}
       eventId={event.id}
+      eventTitle={event.title}
       error={error}
       submitLabel="Save template"
     />,
@@ -806,8 +811,9 @@ function showTemplate(c: Context, services: AdminServices, values?: TemplateValu
   const session = requireSession(c, services);
   if (session instanceof Response) return session;
   const eventId = idFrom(c);
+  const event = getAdminEvent(services.db, eventId);
   const template = getAdminTemplate(services.db, eventId, templateIdFrom(c));
-  if (!template) return missing(c, services);
+  if (!event || !template) return missing(c, services);
   return html(
     c,
     services,
@@ -829,6 +835,7 @@ function showTemplate(c: Context, services: AdminServices, values?: TemplateValu
         }
       }
       eventId={eventId}
+      eventTitle={event.title}
       ended={!template.active}
       error={error}
       submitLabel="Save template"
@@ -1104,6 +1111,8 @@ function showNewShift(c: Context, services: AdminServices, values?: ShiftValues,
       action={appPath(services.config, `/admin/events/${event.id}/shifts`)}
       csrf={session.csrf}
       values={values ?? { role: '', date: '', start: '09:00', end: '12:00', capacity: '1' }}
+      eventId={event.id}
+      eventTitle={event.title}
       error={error}
       submitLabel="Create shift"
     />,
@@ -1135,6 +1144,7 @@ function showShift(
   walkIn?: WalkInState,
   shiftId = idFrom(c),
   confirm?: ConfirmPrompt,
+  editError?: string,
 ) {
   const session = requireSession(c, services);
   if (session instanceof Response) return session;
@@ -1174,6 +1184,7 @@ function showShift(
       contacts={showWalkIn ? loadContacts(services.db, '').people : []}
       moves={confirmed ? { targets, tokens } : undefined}
       confirm={confirm}
+      editError={editError}
     />,
     { account: session, status },
   );
@@ -1249,10 +1260,10 @@ async function submitShift(c: Context, services: AdminServices): Promise<Respons
   const id = idFrom(c);
   const values = shiftValuesFrom(session.body);
   const parsed = parseShift(values);
-  if (!parsed.ok) return showShift(c, services, parsed.error, 400);
+  if (!parsed.ok) return showShift(c, services, undefined, 400, undefined, id, undefined, parsed.error);
   try {
     const saved = updateShift(services.db, session.coordinatorId, id, parsed.value, services.now(), mailIdentity(services.db, services.config));
-    if (!saved.ok) return showShift(c, services, saved.error, 400);
+    if (!saved.ok) return showShift(c, services, undefined, 400, undefined, id, undefined, saved.error);
     return c.redirect(appPath(services.config, `/admin/shifts/${id}?notice=saved`), 303);
   } catch (err) {
     return saveFailed(c, services, session, err);

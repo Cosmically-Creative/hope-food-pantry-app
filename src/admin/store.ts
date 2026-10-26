@@ -8,10 +8,12 @@ import type { MailShift } from '../mail/templates.js';
 import type { MailIdentity } from '../mail/types.js';
 import { confirmedPersonOnShift, confirmedPersonShiftIds, reserveSignup, type ReserveInput, type ReserveResult } from '../signup.js';
 import { isUniqueConstraint } from '../sqlite-error.js';
-import { assertSameDayShift, assertValidTimeZone, formatInstantInZone, formatUtc, localShiftToUtc, LocalTimeError } from '../time.js';
+import { addLocalDays, assertSameDayShift, assertValidTimeZone, formatInstantInZone, formatUtc, localShiftToUtc, LocalTimeError, todayInZone } from '../time.js';
 
 const MANAGE_TOKEN_TTL_HOURS = 24 * 7;
 const REPLACED_LINK = 'This link replaces the earlier one. The previous link no longer works.';
+/** Today through this many days ahead. The event shift list uses the same window. */
+export const DESK_WINDOW_DAYS = 14;
 
 export type AdminEventSummary = {
   id: number;
@@ -19,6 +21,22 @@ export type AdminEventSummary = {
   slug: string;
   published: boolean;
   shiftCount: number;
+};
+
+export type HomeShift = {
+  id: number;
+  eventId: number;
+  eventTitle: string;
+  role: string;
+  date: string;
+  timeLabel: string;
+  capacity: number;
+  occupied: number;
+  full: boolean;
+};
+
+export type HomeEvent = AdminEventSummary & {
+  nextShift: { date: string; timeLabel: string } | null;
 };
 
 export type AdminShiftSummary = {
@@ -147,6 +165,58 @@ export function listAdminEvents(db: Database.Database): AdminEventSummary[] {
     published: row.published === 1,
     shiftCount: Number(row.shift_count),
   }));
+}
+
+/** Open and full shifts in the next two weeks, plus the next open shift on each event. */
+export function listHomeBoard(db: Database.Database, now: string, timeZone: string): { shifts: HomeShift[]; events: HomeEvent[] } {
+  const today = todayInZone(timeZone, Temporal.Instant.from(now));
+  const cutoff = addLocalDays(today, DESK_WINDOW_DAYS);
+  const rows = db
+    .prepare(
+      `SELECT s.id AS id, s.role AS role, s.starts_at_utc AS starts_at_utc, s.capacity AS capacity,
+              e.id AS event_id, e.title AS title, e.tz AS tz,
+              COALESCE(SUM(CASE WHEN su.status = 'confirmed' THEN su.group_size ELSE 0 END), 0) AS occupied
+       FROM shifts s
+       JOIN events e ON e.id = s.event_id
+       LEFT JOIN signups su ON su.shift_id = s.id
+       WHERE s.cancelled = 0 AND s.ends_at_utc > ?
+       GROUP BY s.id
+       ORDER BY s.starts_at_utc, s.id`,
+    )
+    .all(now) as Array<{
+    id: number;
+    role: string;
+    starts_at_utc: string;
+    capacity: number;
+    event_id: number;
+    title: string;
+    tz: string;
+    occupied: number;
+  }>;
+  const nextByEvent = new Map<number, { date: string; timeLabel: string }>();
+  const shifts: HomeShift[] = [];
+  for (const row of rows) {
+    const local = formatInstantInZone(row.starts_at_utc, row.tz);
+    if (!nextByEvent.has(row.event_id)) nextByEvent.set(row.event_id, { date: local.date, timeLabel: local.timeLabel });
+    if (local.date < today || local.date > cutoff) continue;
+    const capacity = Number(row.capacity);
+    const occupied = Number(row.occupied);
+    shifts.push({
+      id: row.id,
+      eventId: row.event_id,
+      eventTitle: row.title,
+      role: row.role,
+      date: local.date,
+      timeLabel: local.timeLabel,
+      capacity,
+      occupied,
+      full: occupied >= capacity,
+    });
+  }
+  return {
+    shifts,
+    events: listAdminEvents(db).map((event) => ({ ...event, nextShift: nextByEvent.get(event.id) ?? null })),
+  };
 }
 
 export function getAdminEvent(db: Database.Database, id: number): AdminEvent | null {
