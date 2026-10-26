@@ -59,7 +59,7 @@ export function startDailyExpansionRunner(db: Database.Database, now: () => stri
     try {
       const result = runDueTemplateExpansion(db, now());
       if (result.created > 0) {
-        console.log(`Added ${result.created} weekly shifts for the next eight weeks.`);
+        console.log(`Added ${result.created} weekly shifts for the next three months.`);
       }
       for (const skip of result.skipped) console.error(skip);
     } catch (err) {

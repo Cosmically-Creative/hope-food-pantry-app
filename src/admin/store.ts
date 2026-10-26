@@ -7,6 +7,7 @@ import { cancelPendingConfirmations, cancelPendingReminders, queueCancellation, 
 import type { MailShift } from '../mail/templates.js';
 import type { MailIdentity } from '../mail/types.js';
 import { confirmedPersonOnShift, confirmedPersonShiftIds, reserveSignup, type ReserveInput, type ReserveResult } from '../signup.js';
+import { isWithinSignupWindow } from '../signup-window.js';
 import { isUniqueConstraint } from '../sqlite-error.js';
 import { addLocalDays, assertSameDayShift, assertValidTimeZone, formatInstantInZone, formatUtc, localShiftToUtc, LocalTimeError, todayInZone } from '../time.js';
 
@@ -1006,7 +1007,7 @@ export function listMoveTargets(
   eventId: number,
   shiftId: number,
   now: string,
-  options?: { publishedOnly?: boolean; excludePerson?: { email: string; name: string } },
+  options?: { publishedOnly?: boolean; excludePerson?: { email: string; name: string }; signupWindow?: boolean },
 ): MoveTarget[] {
   const blocked = new Set<number>();
   if (options?.excludePerson) {
@@ -1042,6 +1043,7 @@ export function listMoveTargets(
     if (Number(row.occupied) >= Number(row.capacity)) return [];
     const start = formatInstantInZone(row.starts_at_utc, row.tz);
     const end = formatInstantInZone(row.ends_at_utc, row.tz);
+    if (options?.signupWindow && !isWithinSignupWindow(start.date, todayInZone(row.tz, Temporal.Instant.from(now)))) return [];
     return [{
       id: row.id,
       date: start.date,
@@ -1197,14 +1199,23 @@ function relocate(
   if (destinationShiftId === source.shift_id) return { ok: false, error: transferError(options.audience, 'same'), shiftId: source.shift_id };
   const destination = db
     .prepare(
-      `SELECT s.id AS id, s.event_id AS event_id, s.cancelled AS cancelled, s.ends_at_utc AS ends_at_utc,
-              s.capacity AS capacity, e.published AS published
+      `SELECT s.id AS id, s.event_id AS event_id, s.cancelled AS cancelled, s.starts_at_utc AS starts_at_utc,
+              s.ends_at_utc AS ends_at_utc, s.capacity AS capacity, e.published AS published, e.tz AS tz
        FROM shifts s
        JOIN events e ON e.id = s.event_id
        WHERE s.id = ?`,
     )
     .get(destinationShiftId) as
-    | { id: number; event_id: number; cancelled: number; ends_at_utc: string; capacity: number; published: number }
+    | {
+        id: number;
+        event_id: number;
+        cancelled: number;
+        starts_at_utc: string;
+        ends_at_utc: string;
+        capacity: number;
+        published: number;
+        tz: string;
+      }
     | undefined;
   if (!destination) return { ok: false, error: transferError(options.audience, 'missing'), shiftId: source.shift_id };
   if (destination.event_id !== source.event_id) return { ok: false, error: transferError(options.audience, 'event'), shiftId: source.shift_id };
@@ -1213,6 +1224,13 @@ function relocate(
   }
   if (destination.cancelled === 1 || destination.ends_at_utc <= now) {
     return { ok: false, error: transferError(options.audience, 'closed'), shiftId: source.shift_id };
+  }
+  if (options.audience === 'volunteer') {
+    const start = formatInstantInZone(destination.starts_at_utc, destination.tz);
+    const today = todayInZone(destination.tz, Temporal.Instant.from(now));
+    if (!isWithinSignupWindow(start.date, today)) {
+      return { ok: false, error: transferError(options.audience, 'early'), shiftId: source.shift_id };
+    }
   }
   if (confirmedPersonOnShift(db, destination.id, source.email_norm, source.name)) {
     return { ok: false, error: transferError(options.audience, 'duplicate'), shiftId: source.shift_id };
@@ -1308,6 +1326,7 @@ function transferError(audience: TransferOptions['audience'], code: TransferErro
     missing: 'That shift is not available.',
     event: 'Choose a shift in this event.',
     closed: 'That shift is closed.',
+    early: 'That shift is not open for sign-up yet.',
     duplicate: 'That person is already signed up for this shift.',
     full: 'That shift is full.',
     used: 'This form was already used for a different signup. Submit it again.',
@@ -1322,6 +1341,7 @@ function transferError(audience: TransferOptions['audience'], code: TransferErro
     missing: 'That shift is not available.',
     event: 'Choose a shift in this event.',
     closed: 'That shift is closed.',
+    early: 'Sign-up for that shift opens three months before the date.',
     duplicate: 'You are already signed up for that shift.',
     full: 'That shift is full.',
     used: 'This form was already used. Open the link from your email.',
@@ -1339,6 +1359,7 @@ type TransferError =
   | 'missing'
   | 'event'
   | 'closed'
+  | 'early'
   | 'duplicate'
   | 'full'
   | 'used'

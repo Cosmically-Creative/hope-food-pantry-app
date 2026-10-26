@@ -91,6 +91,7 @@ import {
   parseContactSkips,
   removeContact,
   saveManualContact,
+  contactSignupShifts,
   walkInFromContact,
   type ContactImportSummary,
   type ContactManualErrors,
@@ -474,6 +475,7 @@ function showContact(
       config={services.config}
       csrf={session.csrf}
       contact={contact}
+      signedUp={contactSignupShifts(services.db, contact, services.now())}
       shifts={listOpenShiftsForPerson(services.db, { email: contact.email, name: contact.name }, services.now())}
       form={state?.form ?? blankWalkIn(services, contact.id)}
       shiftId={state?.shiftId ?? ''}

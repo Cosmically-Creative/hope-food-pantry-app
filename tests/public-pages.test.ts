@@ -2,11 +2,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { listMoveTargets, switchSignup } from '../src/admin/store.js';
 import { createApp, publicDirectory } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { openAppDatabase } from '../src/db.js';
 import { Hono } from 'hono';
 import { CONTENT_SECURITY_POLICY, PERMISSIONS_POLICY, securityHeaders, STRICT_TRANSPORT_SECURITY } from '../src/security.js';
+import { reserveSignup } from '../src/signup.js';
 import { localShiftToUtc } from '../src/time.js';
 import { devEnv } from './env.js';
 
@@ -27,20 +29,28 @@ describe('public pages', () => {
     const html = await home.text();
     expect(html).toContain('Weekly pantry');
     expect(html).not.toContain('Upcoming shifts');
-    expect(html).toContain('Open Sorting');
-    expect(html).toContain('Full Intake');
+    expect(html).toContain('>Sign Up</a>');
+    expect(html).toContain('>List</a>');
+    expect(html).toContain('href="/?view=calendar">Calendar</a>');
+    expect(html).toContain('Sign-up is open through January 14, 2027.');
+    expect(html).toContain('Wednesday Sorting');
+    expect(html).toContain('Wednesday Greeting');
+    expect(html).toContain('Lane Wednesday');
     expect(html).toContain('Live Greeting');
-    expect(html).toContain('1/3 spots filled');
-    expect(html).toContain('1/1 spots filled');
+    expect(html).toContain('0/2 spots filled');
+    expect(html).toContain('1/4 spots filled');
     expect(html).toContain('9:00 AM');
     expect(html).toContain('CDT');
-    expect(html).toContain('October 15');
-    expect(html).toContain('October 2026');
-    expect(html).toContain('shift-calendar');
-    expect(html).toContain('class="cal-line"');
-    expect(html).toContain('class="cal-hold"');
-    expect(html).toContain('class="cal-detail"');
-    expect(html).toContain('>Sun</span>');
+    expect(html).toContain('October 14');
+    expect(html).toContain('October 21');
+    expect(html).toContain('No one signed up yet.');
+    expect(html).toContain('class="day-card"');
+    expect(html).toContain('class="shift-pane"');
+    expect(html.match(/class="day-card"/g)).toHaveLength(2);
+    expect(html.match(/class="shift-pane"/g)).toHaveLength(3);
+    expect(html).not.toContain('shift-calendar');
+    expect(html).not.toContain('Open Sorting');
+    expect(html).not.toContain('Full Intake');
     expect(html).toContain('Today');
     expect(html).toContain('aria-current="date"');
     expect(html).toContain('In progress');
@@ -73,6 +83,7 @@ describe('public pages', () => {
     expect(html).not.toContain('Hidden draft');
     expect(html).not.toContain('Secret Person');
     expect(html).not.toContain('secret.person@example.invalid');
+    expect(html).not.toContain('lane.wednesday@example.invalid');
     expect(html).not.toContain('SECRET-PERSON-NOTE');
     expect(html).not.toContain('SECRET-SHIFT-NOTE');
     expect(html).not.toContain('<form');
@@ -81,7 +92,7 @@ describe('public pages', () => {
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('href="/css/app.css?v=');
     expect(html).toContain('href="/brand/tokens.css?v=');
-    expect(html).toContain(`href="/s/${ids.open}"`);
+    expect(html).toMatch(/href="\/s\/\d+"/);
     expect(home.headers.get('content-security-policy')).toBe(CONTENT_SECURITY_POLICY);
     expect(home.headers.get('referrer-policy')).toBe('no-referrer');
     expect(home.headers.get('x-content-type-options')).toBe('nosniff');
@@ -95,12 +106,32 @@ describe('public pages', () => {
     expect(eventHtml).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(eventHtml).not.toContain('<script>alert(1)</script>');
     expect(eventHtml).toContain('Sioux Center, Iowa');
-    expect(eventHtml).toContain('October 2026');
-    expect(eventHtml).toContain('shift-calendar');
+    expect(eventHtml).toContain('Wednesday Sorting');
+    expect(eventHtml).toContain('Lane Wednesday');
     expect(eventHtml).toContain('Sign up');
-    expect(eventHtml).toContain('View shift');
+    expect(eventHtml).not.toContain('shift-calendar');
     expect(eventHtml).not.toContain('November 2026');
     expect(eventHtml).not.toContain('SECRET-PERSON-NOTE');
+    expect(eventHtml).not.toContain('lane.wednesday@example.invalid');
+
+    const calendar = await (await app.request('/?view=calendar')).text();
+    expect(calendar).toContain('shift-calendar');
+    expect(calendar).toContain('October 2026');
+    expect(calendar).toContain('Open Sorting');
+    expect(calendar).toContain('Full Intake');
+    expect(calendar).toContain('1/3 spots filled');
+    expect(calendar).toContain('1/1 spots filled');
+    expect(calendar).toContain('class="cal-line"');
+    expect(calendar).toContain('class="cal-hold"');
+    expect(calendar).toContain('class="cal-detail"');
+    expect(calendar).toContain('>Sun</span>');
+    expect(calendar).toContain('Secret Person');
+    expect(calendar).toContain('Lane Wednesday');
+    expect(calendar).toContain('View shift');
+    expect(calendar).toContain(`href="/s/${ids.open}"`);
+    expect(calendar).not.toContain('secret.person@example.invalid');
+    expect(calendar).not.toContain('SECRET-PERSON-NOTE');
+    expect(calendar).not.toContain('November 2026');
 
     const shift = await app.request(`/s/${ids.open}`);
     const shiftHtml = await shift.text();
@@ -122,6 +153,9 @@ describe('public pages', () => {
     expect(shiftHtml).not.toContain('data-guardian');
     expect(shiftHtml).not.toContain('I am under 18');
     const css = await (await app.request('/css/app.css')).text();
+    expect(css).toContain('grid-template-columns: repeat(4, minmax(0, 1fr))');
+    expect(css).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
+    expect(css).not.toContain('minmax(16rem, 1fr)');
     expect(css).not.toContain('data-under-18');
     expect(css).not.toContain('data-guardian');
     expect(shiftHtml).not.toContain('SECRET-SHIFT-NOTE');
@@ -253,7 +287,7 @@ describe('public pages', () => {
     expect(await health.json()).toEqual({ ok: true, database: 'ok' });
   });
 
-  it('shows one month at a time and cycles between months that have shifts', async () => {
+  it('shows Wednesday cards by default and one calendar month at a time', async () => {
     const { app, db } = await buildApp();
     const event = db.prepare(`SELECT id AS id FROM events WHERE slug = 'weekly-pantry'`).get() as { id: number };
     insertShift(db, event.id, 'November Sorting', '2026-11-04', '09:00', '12:00', 4, 0);
@@ -261,37 +295,162 @@ describe('public pages', () => {
     insertShift(db, event.id, 'December Sorting', '2026-12-02', '09:00', '12:00', 4, 0);
     const html = await (await app.request('/e/weekly-pantry')).text();
     const home = await (await app.request('/')).text();
-    expect(html).toContain('October 2026');
-    expect(html).toContain('Next month');
-    expect(html).not.toContain('Previous month');
-    expect(html).not.toContain('November 2026');
-    expect(html).not.toContain('September');
-    expect(home).toContain('href="/?month=2026-11"');
-    expect(home).toContain('Next month');
-    expect(html).toContain('Open Sorting');
-    expect(html).not.toContain('November Sorting');
-    expect(html).toContain('href="/e/weekly-pantry?month=2026-11"');
-    expect(html.match(/class="cal-title"/g)).toHaveLength(1);
+    expect(html).toContain('Wednesday Sorting');
+    expect(html).toContain('November Sorting');
+    expect(html).toContain('December Sorting');
+    expect(html).not.toContain('Edge Sorting');
+    expect(html).not.toContain('Open Sorting');
+    expect(html).not.toContain('shift-calendar');
+    expect(html).not.toContain('Next month');
+    expect(home).toContain('href="/?view=calendar"');
+    expect(home).not.toContain('month=2026-11');
 
-    const november = await (await app.request('/e/weekly-pantry?month=2026-11')).text();
+    const october = await (await app.request('/e/weekly-pantry?view=calendar')).text();
+    expect(october).toContain('October 2026');
+    expect(october).toContain('Next month');
+    expect(october).not.toContain('Previous month');
+    expect(october).not.toContain('November 2026');
+    expect(october).not.toContain('September');
+    expect(october).toContain('Open Sorting');
+    expect(october).not.toContain('November Sorting');
+    expect(october).toContain('href="/e/weekly-pantry?view=calendar&amp;month=2026-11"');
+    expect(october.match(/class="cal-title"/g)).toHaveLength(1);
+    expect(home).not.toContain('href="/?month=2026-11"');
+
+    const november = await (await app.request('/e/weekly-pantry?view=calendar&month=2026-11')).text();
     expect(november).toContain('November 2026');
     expect(november).toContain('November Sorting');
+    expect(november).toContain('Edge Sorting');
     expect(november).not.toContain('Open Sorting');
     expect(november).toContain('Previous month');
     expect(november).toContain('Next month');
-    expect(november).toContain('href="/e/weekly-pantry?month=2026-10"');
-    expect(november).toContain('href="/e/weekly-pantry?month=2026-12"');
+    expect(november).toContain('href="/e/weekly-pantry?view=calendar&amp;month=2026-10"');
+    expect(november).toContain('href="/e/weekly-pantry?view=calendar&amp;month=2026-12"');
     expect(november.match(/class="role">Edge Sorting/g)).toHaveLength(1);
 
-    const december = await (await app.request('/e/weekly-pantry?month=2026-12')).text();
+    const december = await (await app.request('/e/weekly-pantry?view=calendar&month=2026-12')).text();
     expect(december).toContain('December Sorting');
     expect(december).toContain('Previous month');
     expect(december).not.toContain('Next month');
     expect(december).not.toContain('November Sorting');
 
-    const invalid = await (await app.request('/e/weekly-pantry?month=nope')).text();
+    const invalid = await (await app.request('/e/weekly-pantry?view=calendar&month=nope')).text();
     expect(invalid).toContain('October 2026');
     expect(invalid).toContain('Open Sorting');
+
+    const cardsDespiteMonth = await (await app.request('/e/weekly-pantry?month=2026-11')).text();
+    expect(cardsDespiteMonth).toContain('Wednesday Sorting');
+    expect(cardsDespiteMonth).not.toContain('shift-calendar');
+  });
+
+  it('lists only the next three months and refuses signup after that', async () => {
+    const { app, db, ids } = await buildApp();
+    const event = db.prepare(`SELECT id AS id FROM events WHERE slug = 'weekly-pantry'`).get() as { id: number };
+    const windowId = insertShift(db, event.id, 'Window Sorting', '2027-01-13', '09:00', '12:00', 3, 0);
+    const deadlineId = insertShift(db, event.id, 'Deadline Sorting', '2027-01-14', '09:00', '12:00', 3, 0);
+    const laterId = insertShift(db, event.id, 'Later Sorting', '2027-01-20', '09:00', '12:00', 3, 0);
+    insertShift(db, event.id, 'Spring Sorting', '2027-04-07', '09:00', '12:00', 3, 0);
+    const mail = {
+      baseUrl: 'http://127.0.0.1:3000',
+      basePath: '',
+      from: 'Hope Food Pantry <volunteer@example.invalid>',
+      replyTo: 'volunteer@example.invalid',
+    };
+    const windowSignup = reserveSignup(db, {
+      shiftId: windowId,
+      name: 'Window Person',
+      email: 'window.person@example.invalid',
+      phone: '712-555-0108',
+      notes: 'WINDOW-NOTE',
+      operationId: 'window-operation',
+      now: NOW,
+      mail,
+    });
+    expect(windowSignup.ok).toBe(true);
+
+    const cards = await (await app.request('/')).text();
+    expect(cards).toContain('Window Sorting');
+    expect(cards).toContain('Window Person');
+    expect(cards).not.toContain('window.person@example.invalid');
+    expect(cards).not.toContain('WINDOW-NOTE');
+    expect(cards).not.toContain('Deadline Sorting');
+    expect(cards).not.toContain('Later Sorting');
+    expect(cards).not.toContain('Spring Sorting');
+    expect(cards).toContain('Sign-up is open through January 14, 2027.');
+
+    const january = await (await app.request('/?view=calendar&month=2027-01')).text();
+    expect(january).toContain('January 2027');
+    expect(january).toContain('Window Sorting');
+    expect(january).toContain('Window Person');
+    expect(january).toContain('Deadline Sorting');
+    expect(january).not.toContain('Later Sorting');
+    expect(january).not.toContain('Spring Sorting');
+    expect(january).not.toContain('Next month');
+
+    const spring = await (await app.request('/?view=calendar&month=2027-04')).text();
+    expect(spring).toContain('October 2026');
+    expect(spring).not.toContain('Spring Sorting');
+
+    const laterPage = await app.request(`/s/${laterId}`);
+    const laterHtml = await laterPage.text();
+    expect(laterPage.status).toBe(200);
+    expect(laterHtml).toContain('Sign-up opens three months before this shift.');
+    expect(laterHtml).not.toContain('<form');
+    const deadlinePage = await (await app.request(`/s/${deadlineId}`)).text();
+    expect(deadlinePage).toContain('<form');
+    expect(deadlinePage).not.toContain('Sign-up opens three months before this shift.');
+
+    const early = reserveSignup(db, {
+      shiftId: laterId,
+      name: 'Later Person',
+      email: 'later.person@example.invalid',
+      phone: '712-555-0109',
+      notes: null,
+      operationId: 'later-operation',
+      now: NOW,
+      mail,
+    });
+    expect(early).toEqual({ ok: false, reason: 'early' });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM signups WHERE email_norm = 'later.person@example.invalid'").get()).toEqual({ n: 0 });
+
+    const targets = listMoveTargets(db, event.id, ids.open, NOW, { publishedOnly: true, signupWindow: true });
+    expect(targets.map((target) => target.id)).not.toContain(laterId);
+    expect(targets.map((target) => target.id)).toContain(deadlineId);
+    const coordinatorTargets = listMoveTargets(db, event.id, ids.open, NOW);
+    expect(coordinatorTargets.map((target) => target.id)).toContain(laterId);
+
+    if (!windowSignup.ok) throw new Error('Window signup was not saved.');
+    const switched = switchSignup(db, windowSignup.signupId, laterId, 'switch-later', NOW, mail);
+    expect(switched.ok).toBe(false);
+    if (!switched.ok) expect(switched.error).toContain('three months');
+    expect(db.prepare('SELECT shift_id AS shift_id, status AS status FROM signups WHERE id = ?').get(windowSignup.signupId)).toEqual({
+      shift_id: windowId,
+      status: 'confirmed',
+    });
+  });
+
+  it('leaves a full shift on the list without a link', async () => {
+    const { app, db } = await buildApp();
+    const event = db.prepare(`SELECT id AS id FROM events WHERE slug = 'weekly-pantry'`).get() as { id: number };
+    const full = insertShift(db, event.id, 'Full Wednesday', '2026-10-28', '09:00', '12:00', 1, 0);
+    insertSignup(db, full, { name: 'Full Person', email: 'full.person@example.invalid' });
+    const html = await (await app.request('/')).text();
+    const start = html.indexOf('Full Wednesday');
+    const pane = html.slice(html.lastIndexOf('<section class="shift-pane"', start), html.indexOf('</section>', start));
+    expect(pane).toContain('1/1 spots filled');
+    expect(pane).toContain('class="btn-card is-static"');
+    expect(pane).toContain('>Full</span>');
+    expect(pane).toContain('Not accepting more signups');
+    expect(pane).not.toContain('View shift');
+    expect(pane).not.toContain('href=');
+    expect(pane).not.toContain('right-arrow');
+    expect(html).not.toContain(`href="/s/${full}"`);
+    const calendar = await (await app.request('/?view=calendar&month=2026-10')).text();
+    expect(calendar).toContain(`href="/s/${full}"`);
+    const openStart = html.indexOf('Wednesday Sorting');
+    const openPane = html.slice(html.lastIndexOf('<section class="shift-pane"', openStart), html.indexOf('</section>', openStart));
+    expect(openPane).toContain('>Sign up');
+    expect(openPane).toContain('href="/s/');
   });
 
   it('shows an empty list when nothing is upcoming', async () => {
@@ -336,6 +495,9 @@ function seedCatalog(db: import('better-sqlite3').Database) {
   });
   const open = insertShift(db, event, 'Open Sorting', '2026-10-15', '09:00', '12:00', 3, 0);
   insertSignup(db, open);
+  const wednesday = insertShift(db, event, 'Wednesday Sorting', '2026-10-21', '09:00', '12:00', 4, 0);
+  insertSignup(db, wednesday, { name: 'Lane Wednesday', email: 'lane.wednesday@example.invalid' });
+  insertShift(db, event, 'Wednesday Greeting', '2026-10-21', '12:00', '15:00', 2, 0);
   const full = insertShift(db, event, 'Full Intake', '2026-10-16', '09:00', '12:00', 1, 0);
   insertSignup(db, full);
   const cancelled = insertShift(db, event, 'Cancelled Distribution', '2026-10-17', '09:00', '12:00', 4, 1);
@@ -386,12 +548,18 @@ function versionedAsset(html: string, file: string): string {
   return `${file}?v=${match[1]}`;
 }
 
-function insertSignup(db: import('better-sqlite3').Database, shiftId: number): void {
+function insertSignup(
+  db: import('better-sqlite3').Database,
+  shiftId: number,
+  person?: { name: string; email: string },
+): void {
+  const name = person?.name ?? 'Secret Person';
+  const email = person?.email ?? 'secret.person@example.invalid';
   db.prepare(
     `INSERT INTO signups (
        shift_id, name, email, email_norm, is_minor, group_size, notes, status, reminders_off, created_at, updated_at
-     ) VALUES (?, 'Secret Person', 'secret.person@example.invalid', 'secret.person@example.invalid', 0, 1, 'SECRET-PERSON-NOTE', 'confirmed', 0, '2026-10-01T15:00:00.000Z', '2026-10-01T15:00:00.000Z')`,
-  ).run(shiftId);
+     ) VALUES (?, ?, ?, ?, 0, 1, 'SECRET-PERSON-NOTE', 'confirmed', 0, '2026-10-01T15:00:00.000Z', '2026-10-01T15:00:00.000Z')`,
+  ).run(shiftId, name, email, email);
 }
 
 describe('security headers', () => {

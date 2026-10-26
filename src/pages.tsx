@@ -1,7 +1,8 @@
 import type { Child } from 'hono/jsx';
 import type { AppConfig } from './config.js';
 import { WEEKDAY_SHORT, calendarMonth, calendarToday, chooseCalendarMonth, monthStep, type CalendarDay } from './calendar.js';
-import { spotsSentence, type PublicEvent, type PublicShift } from './schedule.js';
+import { WEDNESDAY, spotsSentence, type PublicEvent, type PublicShift } from './schedule.js';
+import { SIGNUP_TOO_EARLY, signupDeadlineLabel } from './signup-window.js';
 import type { SignupErrors, SignupValues } from './signup-form.js';
 import type { MoveTarget } from './admin/store.js';
 import { ShiftTargetOptions } from './shift-options.js';
@@ -100,7 +101,7 @@ export function Layout(props: {
         <main id="content" tabIndex={-1}>
           <div class="session-bar">
             <a href={home} aria-current={props.path === home ? 'page' : undefined}>
-              Calendar
+              Sign Up
             </a>
             <a href={coordinator} class={props.account ? undefined : 'session-entry'} aria-current={coordinatorHere ? 'page' : undefined}>
               Coordinator
@@ -224,7 +225,14 @@ export function EmptySchedulePage() {
   );
 }
 
-export function EventPage(props: { config: AppConfig; event: PublicEvent; now: string; month?: string; path?: string }) {
+export function EventPage(props: {
+  config: AppConfig;
+  event: PublicEvent;
+  now: string;
+  month?: string;
+  view?: string;
+  path?: string;
+}) {
   const description = props.event.description.trim();
   return (
     <>
@@ -235,11 +243,12 @@ export function EventPage(props: { config: AppConfig; event: PublicEvent; now: s
       {props.event.shifts.length === 0 ? (
         <p class="empty">No upcoming shifts are posted for this event.</p>
       ) : (
-        <ShiftCalendar
+        <PublicSchedule
           config={props.config}
           event={props.event}
           now={props.now}
           month={props.month}
+          view={props.view}
           path={props.path ?? `/e/${encodeURIComponent(props.event.slug)}`}
         />
       )}
@@ -485,8 +494,149 @@ export function WaitPage() {
   );
 }
 
+function scheduleHref(config: AppConfig, path: string, view?: 'calendar', monthId?: string): string {
+  const base = appPath(config, path);
+  if (view !== 'calendar') return base;
+  const params = new URLSearchParams({ view: 'calendar' });
+  if (monthId) params.set('month', monthId);
+  return `${base}?${params.toString()}`;
+}
+
 function monthHref(config: AppConfig, path: string, monthId: string): string {
-  return `${appPath(config, path)}?month=${monthId}`;
+  return scheduleHref(config, path, 'calendar', monthId);
+}
+
+function signupWindowSentence(timeZone: string, now: string): string {
+  return `Sign-up is open through ${signupDeadlineLabel(calendarToday(timeZone, now))}.`;
+}
+
+function PublicSchedule(props: {
+  config: AppConfig;
+  event: PublicEvent;
+  now: string;
+  month?: string;
+  view?: string;
+  path: string;
+}) {
+  const calendarView = props.view === 'calendar';
+  return (
+    <div class="signup-board">
+      <div class="schedule-bar">
+        <details class="view-menu">
+          <summary>
+            <span class="view-menu-kicker">View</span>
+            <span>{calendarView ? 'Calendar' : 'List'}</span>
+          </summary>
+          <div class="view-menu-list">
+            <a href={scheduleHref(props.config, props.path)} aria-current={calendarView ? undefined : 'page'}>
+              List
+            </a>
+            <a href={scheduleHref(props.config, props.path, 'calendar')} aria-current={calendarView ? 'page' : undefined}>
+              Calendar
+            </a>
+          </div>
+        </details>
+        <p class="window-note">{signupWindowSentence(props.event.timeZone, props.now)}</p>
+      </div>
+      {calendarView ? (
+        <ShiftCalendar config={props.config} event={props.event} now={props.now} month={props.month} path={props.path} />
+      ) : (
+        <WednesdayBoard config={props.config} event={props.event} now={props.now} />
+      )}
+    </div>
+  );
+}
+
+type WednesdayGroup = {
+  date: string;
+  heading: string;
+  shifts: PublicShift[];
+};
+
+function wednesdayGroups(shifts: PublicShift[]): WednesdayGroup[] {
+  const groups: WednesdayGroup[] = [];
+  for (const shift of shifts) {
+    if (shift.when.weekday !== WEDNESDAY) continue;
+    const last = groups.at(-1);
+    if (last && last.date === shift.when.date) {
+      last.shifts.push(shift);
+    } else {
+      const comma = shift.when.dateLabel.indexOf(', ');
+      groups.push({
+        date: shift.when.date,
+        heading: comma === -1 ? shift.when.dateLabel : shift.when.dateLabel.slice(comma + 2),
+        shifts: [shift],
+      });
+    }
+  }
+  return groups;
+}
+
+function WednesdayBoard(props: { config: AppConfig; event: PublicEvent; now: string }) {
+  const today = calendarToday(props.event.timeZone, props.now);
+  const days = wednesdayGroups(props.event.shifts);
+  if (days.length === 0) {
+    return <p class="empty">No Wednesday shifts are posted. The calendar lists shifts on other days.</p>;
+  }
+  return (
+    <ol class="day-board">
+      {days.map((day) => (
+        <li key={day.date}>
+          <article class="day-card" aria-current={day.date === today ? 'date' : undefined}>
+            <header class="day-card-head">
+              <p class="day-card-dow">Wednesday</p>
+              <h2>
+                <time dateTime={day.date}>{day.heading}</time>
+              </h2>
+              {day.date === today ? <span class="today-flag">Today</span> : null}
+            </header>
+            <div class="day-card-shifts">
+              {day.shifts.map((shift) => (
+                <ShiftPane key={shift.id} config={props.config} shift={shift} />
+              ))}
+            </div>
+          </article>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function ShiftPane(props: { config: AppConfig; shift: PublicShift }) {
+  const shift = props.shift;
+  const closed = shift.full || shift.cancelled || shift.ended;
+  const action = closed ? 'View shift' : 'Sign up';
+  return (
+    <section class="shift-pane">
+      <div class="shift-pane-body">
+        <h3>{shift.role}</h3>
+        <ShiftWhen shift={shift} />
+        {shift.inProgress ? <p class="status">In progress</p> : null}
+        <Spots shift={shift} />
+        <h4 class="roster-label">Volunteers</h4>
+        {shift.volunteers.length === 0 ? (
+          <p class="roster-empty">No one signed up yet.</p>
+        ) : (
+          <ul class="roster-names">
+            {shift.volunteers.map((name, index) => (
+              <li key={`${shift.id}-${index}`}>{name}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {shift.full ? (
+        <p class="btn-card is-static">
+          <span class="shift-full-label">Full</span>
+          <span>Not accepting more signups</span>
+        </p>
+      ) : (
+        <a class="btn-card" href={appPath(props.config, `/s/${shift.id}`)}>
+          {action}
+          <img src={asset(props.config, '/img/icons/right-arrow.svg')} alt="" />
+        </a>
+      )}
+    </section>
+  );
 }
 
 function MonthArrow(props: { config: AppConfig; path: string; monthId: string; direction: 'prev' | 'next' }) {
@@ -661,6 +811,7 @@ function CalendarShift(props: { config: AppConfig; shift: PublicShift }) {
         {action} for {shift.role} on {shift.when.dateLabel}, {shift.when.startLabel} to {shift.when.endLabel}{' '}
         {shift.when.abbreviation}. {spotsSentence(shift)}
         {shift.inProgress ? ' In progress.' : ''}
+        {shift.volunteers.length > 0 ? ` Volunteers: ${shift.volunteers.join(', ')}.` : ' No one signed up yet.'}
       </span>
       <div class="cal-detail" aria-hidden="true">
         <span class="cal-hold" aria-hidden="true"></span>
@@ -673,6 +824,7 @@ function CalendarShift(props: { config: AppConfig; shift: PublicShift }) {
         </span>
         {shift.inProgress ? <span class="status">In progress</span> : null}
         <Spots shift={shift} />
+        <span class="cal-names">{shift.volunteers.length > 0 ? shift.volunteers.join(', ') : 'No one signed up yet.'}</span>
         <span class="cal-action">{action}</span>
       </div>
     </a>
@@ -822,6 +974,14 @@ function Field(props: {
 function StatusLine(props: { shift: PublicShift }) {
   if (props.shift.cancelled) return <p class="status">Cancelled. This shift is closed.</p>;
   if (props.shift.ended) return <p class="status">Ended. This shift is closed.</p>;
+  if (props.shift.tooEarly) {
+    return (
+      <>
+        <p class="status">{SIGNUP_TOO_EARLY}</p>
+        <Spots shift={props.shift} />
+      </>
+    );
+  }
   return (
     <>
       {props.shift.inProgress ? <p class="status">In progress</p> : null}

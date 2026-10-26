@@ -1,10 +1,8 @@
 import { Temporal } from '@js-temporal/polyfill';
 import type Database from 'better-sqlite3';
 import { writeAudit } from './auth/audit.js';
-import { LocalTimeError, addLocalDays, localShiftToUtc, todayInZone } from './time.js';
-
-/** How far ahead an active template fills the schedule, counted in local days. */
-export const TEMPLATE_HORIZON_DAYS = 56;
+import { signupDeadline } from './signup-window.js';
+import { LocalTimeError, localShiftToUtc, todayInZone } from './time.js';
 
 export type ExpandResult = {
   created: number;
@@ -88,7 +86,7 @@ function expandOne(
     if (err instanceof LocalTimeError) return { created: 0, skipped: [err.message] };
     throw err;
   }
-  const windowEnd = addLocalDays(today, TEMPLATE_HORIZON_DAYS);
+  const windowEnd = signupDeadline(today);
   const dates = occurrenceDates(template, today, windowEnd);
   const insert = db.prepare(
     `INSERT OR IGNORE INTO shifts (

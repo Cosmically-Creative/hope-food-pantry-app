@@ -284,6 +284,120 @@ describe('contact pages', () => {
     expect(await hidden.text()).not.toContain('kristi@example.invalid');
   });
 
+  it('shows current and past shifts on the contact page', async () => {
+    const { app, db } = await buildApp();
+    const cookie = await signIn(app, db);
+    await postFile(
+      app,
+      cookie,
+      [
+        'First Name,Last Name,Email,Phone',
+        'Ada,Example,ada@example.invalid,712-555-0101',
+        'Ada,Other,ada@example.invalid,712-555-0102',
+        'Pat,-,pat@example.invalid,712-555-0103',
+      ].join('\n'),
+    );
+    const currentId = insertShift(db, { title: 'Weekly pantry', role: 'Sorting', start: '2026-10-14T16:00:00.000Z', end: '2026-10-14T20:00:00.000Z' });
+    const nextId = insertShift(db, { slug: 'next', title: 'Pantry & <shift>', role: 'Packing' });
+    const quietId = insertShift(db, {
+      slug: 'soup',
+      title: 'Soup kitchen',
+      role: 'Serving',
+      published: 0,
+      start: '2026-10-22T14:00:00.000Z',
+      end: '2026-10-22T17:00:00.000Z',
+    });
+    const greetingId = insertShift(db, {
+      slug: 'door',
+      title: 'Front door',
+      role: 'Greeting',
+      start: '2026-10-23T14:00:00.000Z',
+      end: '2026-10-23T17:00:00.000Z',
+    });
+    const endedId = insertShift(db, {
+      slug: 'finished',
+      title: 'Finished pantry',
+      role: 'Finished',
+      start: '2026-10-14T14:00:00.000Z',
+      end: '2026-10-14T17:00:00.000Z',
+    });
+    const olderId = insertShift(db, {
+      slug: 'older',
+      title: 'Older pantry',
+      role: 'Older',
+      start: '2026-10-07T14:00:00.000Z',
+      end: '2026-10-07T17:00:00.000Z',
+    });
+    const closedId = insertShift(db, { slug: 'closed', title: 'Closed pantry', role: 'Closing', cancelled: 1 });
+    const droppedId = insertShift(db, {
+      slug: 'dropped',
+      title: 'Dropped pantry',
+      role: 'Dropped',
+      start: '2026-10-24T14:00:00.000Z',
+      end: '2026-10-24T17:00:00.000Z',
+    });
+    insertSignup(db, currentId, { name: 'ADA EXAMPLE', email: 'ada@example.invalid' });
+    insertSignup(db, nextId, { name: 'Ada Example', email: 'ada@example.invalid' });
+    insertSignup(db, quietId, { name: 'Ada Example', email: 'ada@example.invalid' });
+    insertSignup(db, greetingId, { name: 'Pat', email: 'pat@example.invalid' });
+    insertSignup(db, endedId, { name: 'Ada Example', email: 'ada@example.invalid' });
+    insertSignup(db, olderId, { name: 'Ada Example', email: 'ada@example.invalid', status: 'cancelled' });
+    insertSignup(db, closedId, { name: 'Ada Example', email: 'ada@example.invalid' });
+    insertSignup(db, droppedId, { name: 'Ada Example', email: 'ada@example.invalid', status: 'cancelled' });
+    insertSignup(db, greetingId, { name: 'Ada Other', email: 'other@example.invalid' });
+
+    const found = await app.request('/admin/contacts?q=ada', { headers: { cookie } });
+    const foundHtml = await found.text();
+    expect(foundHtml).toContain('Ada Example');
+    expect(foundHtml).toContain('Ada Other');
+    expect(foundHtml).not.toContain('Not signed up for a shift.');
+    expect(foundHtml).not.toContain('Pantry &amp; &lt;shift&gt;');
+    expect(foundHtml).not.toContain('/admin/shifts/');
+
+    const adaId = (db.prepare(`SELECT id AS id FROM contacts WHERE last_name = 'Example'`).get() as { id: number }).id;
+    const person = await app.request(`/admin/contacts/${adaId}`, { headers: { cookie } });
+    const personHtml = await person.text();
+    const current = sectionHtml(personHtml, 'Signed up for', 'Past shifts');
+    const past = sectionHtml(personHtml, 'Past shifts', 'Edit contact');
+    expect(current).toContain(`href="/admin/shifts/${currentId}"`);
+    expect(current).toContain('Weekly pantry: Sorting, October 14, 2026, 11:00 AM to 3:00 PM CDT');
+    expect(current).toContain(`href="/admin/shifts/${nextId}"`);
+    expect(current).toContain('Pantry &amp; &lt;shift&gt;: Packing, October 21, 2026, 9:00 AM to 12:00 PM CDT');
+    expect(current).not.toContain('Pantry & <shift>');
+    expect(current).toContain(`href="/admin/shifts/${quietId}"`);
+    expect(current).toContain('Soup kitchen: Serving, October 22, 2026, 9:00 AM to 12:00 PM CDT (not on the public list)');
+    expect(current.indexOf(`href="/admin/shifts/${currentId}"`)).toBeLessThan(current.indexOf(`href="/admin/shifts/${nextId}"`));
+    expect(current.indexOf(`href="/admin/shifts/${nextId}"`)).toBeLessThan(current.indexOf(`href="/admin/shifts/${quietId}"`));
+    expect(current).not.toContain('Finished');
+    expect(current).not.toContain('Closing');
+    expect(current).not.toContain('Dropped');
+    expect(past).toContain(`href="/admin/shifts/${endedId}"`);
+    expect(past).toContain('Finished pantry: Finished, October 14, 2026, 9:00 AM to 12:00 PM CDT');
+    expect(past).toContain(`href="/admin/shifts/${olderId}"`);
+    expect(past).toContain('Older pantry: Older, October 7, 2026, 9:00 AM to 12:00 PM CDT (cancelled)');
+    expect(past.indexOf(`href="/admin/shifts/${endedId}"`)).toBeLessThan(past.indexOf(`href="/admin/shifts/${olderId}"`));
+    expect(past).not.toContain('Weekly pantry');
+    expect(past).not.toContain('Dropped');
+    expect(past).not.toContain('Closing');
+    expect(personHtml).toContain('<summary>Edit contact');
+    expect(personHtml).toContain('<summary>Add to a shift');
+    expect(personHtml.match(/<details class="contact-menu" name="contact-action"/g)).toHaveLength(2);
+    expect(personHtml).not.toContain('<details class="contact-menu" open');
+
+    const otherId = (db.prepare(`SELECT id AS id FROM contacts WHERE last_name = 'Other'`).get() as { id: number }).id;
+    const otherPage = await app.request(`/admin/contacts/${otherId}`, { headers: { cookie } });
+    const otherHtml = await otherPage.text();
+    expect(otherHtml).toContain('Not signed up for a shift.');
+    expect(otherHtml).toContain('No past shifts.');
+    expect(otherHtml).not.toContain('/admin/shifts/');
+
+    const patId = (db.prepare(`SELECT id AS id FROM contacts WHERE last_name = '-'`).get() as { id: number }).id;
+    const patPage = await app.request(`/admin/contacts/${patId}`, { headers: { cookie } });
+    const patHtml = await patPage.text();
+    expect(sectionHtml(patHtml, 'Signed up for', 'Past shifts')).toContain(`href="/admin/shifts/${greetingId}"`);
+    expect(patHtml).toContain('Front door: Greeting, October 23, 2026, 9:00 AM to 12:00 PM CDT');
+  });
+
   it('fills a walk-in from a saved contact and can remove the contact afterward', async () => {
     const { app, db } = await buildApp();
     const cookie = await signIn(app, db);
@@ -475,7 +589,12 @@ describe('contact pages', () => {
     expect(loggedOut.status).toBe(303);
     const cookie = await signIn(app, db);
     const page = await app.request('/admin/contacts', { headers: { cookie } });
-    expect(await page.text()).toContain('Save this contact');
+    const pageHtml = await page.text();
+    expect(pageHtml).toContain('Save this contact');
+    expect(pageHtml.indexOf('id="contacts-heading"')).toBeGreaterThan(-1);
+    expect(pageHtml.indexOf('id="contacts-heading"')).toBeLessThan(pageHtml.indexOf('<summary>Add a contact'));
+    expect(pageHtml.match(/<details class="contact-menu" name="contact-tools"/g)).toHaveLength(3);
+    expect(pageHtml).not.toContain('<details class="contact-menu" name="contact-tools" open');
 
     const saved = await postManual(app, cookie, { firstName: 'ada', lastName: 'example', email: 'Ada@Example.invalid', phone: '7125550100' });
     expect(saved.status).toBe(303);
@@ -521,6 +640,7 @@ describe('contact pages', () => {
     expect(invalidHtml).toContain('Enter a first name.');
     expect(invalidHtml).toContain('Enter an email address.');
     expect(invalidHtml).toContain('Enter a phone number.');
+    expect(invalidHtml).toContain('<details class="contact-menu" name="contact-tools" open');
     expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(2);
     expect(await (await app.request('/')).text()).not.toContain('ada@example.invalid');
   });
@@ -540,8 +660,9 @@ describe('contact pages', () => {
     const person = await app.request(`/admin/contacts/${contactId}`, { headers: { cookie } });
     const personHtml = await person.text();
     expect(person.status).toBe(200);
-    expect(personHtml).toContain('Correct this contact');
-    expect(personHtml).toContain('Save this correction');
+    expect(personHtml).toContain('Edit contact');
+    expect(personHtml).toContain('Save contact');
+    expect(personHtml).not.toContain('Correct this contact');
     expect(personHtml).toContain('value="Pat"');
     expect(personHtml).toContain('value="-"');
     expect(personHtml).toContain('value="pat@example.invalid"');
@@ -737,6 +858,23 @@ function rowMarkup(html: string, name: string): string {
   const at = html.indexOf(`>${name}<`);
   const li = html.lastIndexOf('<li', at);
   return li < 0 || at < 0 ? '' : html.slice(li, at);
+}
+
+function sectionHtml(html: string, start: string, end: string): string {
+  const at = html.indexOf(start);
+  const stop = html.indexOf(end, at + start.length);
+  return at < 0 || stop < 0 ? '' : html.slice(at, stop);
+}
+
+function insertSignup(
+  db: Awaited<ReturnType<typeof openDb>>,
+  shiftId: number,
+  person: { name: string; email: string; status?: string },
+) {
+  db.prepare(
+    `INSERT INTO signups (shift_id, name, email, email_norm, group_size, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 1, ?, ?, ?)`,
+  ).run(shiftId, person.name, person.email, person.email, person.status ?? 'confirmed', NOW, NOW);
 }
 
 function count(db: Awaited<ReturnType<typeof openDb>>, sql: string): number {

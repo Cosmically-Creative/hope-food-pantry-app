@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 describe('weekly template expansion', () => {
-  it('adds the next eight weeks and leaves an existing occurrence alone', async () => {
+  it('adds the next three months and leaves an existing occurrence alone', async () => {
     const db = await openDb();
     const eventId = insertEvent(db, 'weekly', ZONE);
     const templateId = insertTemplate(db, eventId, { weekday: 3, startsOn: '2026-10-14' });
@@ -40,7 +40,7 @@ describe('weekly template expansion', () => {
     ).run(eventId);
 
     const first = expandTemplates(db, NOW);
-    expect(first).toEqual({ created: 8, templates: 1, skipped: [] });
+    expect(first).toEqual({ created: 13, templates: 1, skipped: [] });
     const dates = db
       .prepare(
         `SELECT occurrence_date AS occurrence_date, role AS role, capacity AS capacity, cancelled AS cancelled, template_revision AS template_revision
@@ -57,6 +57,11 @@ describe('weekly template expansion', () => {
       '2026-11-25',
       '2026-12-02',
       '2026-12-09',
+      '2026-12-16',
+      '2026-12-23',
+      '2026-12-30',
+      '2027-01-06',
+      '2027-01-13',
     ]);
     expect(dates[0]).toMatchObject({ role: 'Kept', capacity: 2, cancelled: 1, template_revision: 1 });
     expect(dates.slice(1).every((row) => row.role === 'Sorting' && row.capacity === 6 && row.cancelled === 0)).toBe(true);
@@ -71,7 +76,7 @@ describe('weekly template expansion', () => {
     };
     expect(audit.coordinator_id).toBeNull();
     expect(audit.detail_json).not.toContain('@');
-    expect(JSON.parse(audit.detail_json)).toEqual({ templateId, created: 8 });
+    expect(JSON.parse(audit.detail_json)).toEqual({ templateId, created: 13 });
   });
 
   it('keeps 9:00 local on both sides of a daylight-saving change', async () => {
@@ -143,13 +148,13 @@ describe('add weekly shifts', () => {
     expect(added.headers.get('location')).toBe(`/admin/events/${eventId}?notice=generated`);
     const page = await app.request(added.headers.get('location') ?? '', { headers: { cookie } });
     const html = await page.text();
-    expect(html).toContain('Weekly shifts for the next eight weeks are on the schedule.');
+    expect(html).toContain('Weekly shifts for the next three months are on the schedule.');
     expect(html).toContain('Add weekly shifts');
-    expect(count(db, 'SELECT COUNT(*) AS n FROM shifts')).toBe(9);
+    expect(count(db, 'SELECT COUNT(*) AS n FROM shifts')).toBe(14);
 
     const repeat = await postGenerate(app, eventId, cookie);
     expect(repeat.headers.get('location')).toBe(`/admin/events/${eventId}?notice=generated`);
-    expect(count(db, 'SELECT COUNT(*) AS n FROM shifts')).toBe(9);
+    expect(count(db, 'SELECT COUNT(*) AS n FROM shifts')).toBe(14);
     expect(count(db, "SELECT COUNT(*) AS n FROM audit WHERE action = 'template.expand'")).toBe(1);
 
     const none = await postGenerate(app, empty, cookie);

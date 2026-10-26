@@ -5,6 +5,7 @@ import { csvCell, csvImportedCell } from './export.js';
 import { capitalizeName, formatPhone } from './person-format.js';
 import type { SignupValues } from './signup-form.js';
 import { isUniqueConstraint } from './sqlite-error.js';
+import { formatInstantInZone, isUtcInstant } from './time.js';
 
 const MAX_ROWS = 2000;
 export const CONTACT_LIST_PAGE = 20;
@@ -32,6 +33,12 @@ export type ContactImportSummary = {
   unchanged: number;
   skipped: number;
   skips: ContactSkip[];
+};
+
+export type ContactShift = {
+  signupId: number;
+  shiftId: number;
+  label: string;
 };
 
 export type Contact = {
@@ -207,6 +214,41 @@ export function loadContacts(db: Database.Database, query: string): { total: num
   };
 }
 
+/**
+ * Shifts this saved person signed up for.
+ * Current means a confirmed signup whose shift has not ended.
+ * Past means the shift has ended, including a cancelled signup.
+ */
+export function contactSignupShifts(
+  db: Database.Database,
+  person: Pick<Contact, 'firstName' | 'lastName' | 'email'>,
+  now: string,
+): { current: ContactShift[]; past: ContactShift[] } {
+  if (!isUtcInstant(now)) return { current: [], past: [] };
+  const rows = db
+    .prepare(
+      `SELECT su.id AS signup_id, su.status AS status,
+              s.id AS id, s.role AS role, s.starts_at_utc AS starts_at_utc, s.ends_at_utc AS ends_at_utc,
+              s.cancelled AS cancelled, e.title AS title, e.tz AS tz, e.published AS published
+       FROM signups su
+       JOIN shifts s ON s.id = su.shift_id
+       JOIN events e ON e.id = s.event_id
+       WHERE su.anonymized_at IS NULL AND su.name IS NOT NULL AND su.email_norm IS NOT NULL
+         AND su.email_norm = ? AND su.name = ? COLLATE NOCASE
+       ORDER BY s.starts_at_utc, s.id, su.id`,
+    )
+    .all(person.email, contactSignupName(person)) as ContactShiftRow[];
+  const current: ContactShift[] = [];
+  const past: ContactShift[] = [];
+  for (const row of rows) {
+    const shift = { signupId: row.signup_id, shiftId: row.id, label: contactShiftLabel(row) };
+    if (row.ends_at_utc > now && row.status === 'confirmed' && row.cancelled === 0) current.push(shift);
+    else if (row.ends_at_utc <= now) past.push(shift);
+  }
+  past.reverse();
+  return { current, past };
+}
+
 export function getContact(db: Database.Database, id: number): Contact | null {
   if (!Number.isSafeInteger(id) || id < 1) return null;
   const row = db.prepare('SELECT id, first_name, last_name, email, phone FROM contacts WHERE id = ?').get(id) as ContactRow | undefined;
@@ -339,6 +381,34 @@ function present(row: ContactRow): Contact {
     email: row.email,
     phone: row.phone,
   };
+}
+
+type ContactShiftRow = {
+  signup_id: number;
+  status: string;
+  id: number;
+  role: string;
+  starts_at_utc: string;
+  ends_at_utc: string;
+  cancelled: number;
+  title: string;
+  tz: string;
+  published: number;
+};
+
+/** A signup with no space is saved with a hyphen as the last name. The signup itself keeps the single name. */
+function contactSignupName(person: Pick<Contact, 'firstName' | 'lastName'>): string {
+  return person.lastName === '-' ? person.firstName : `${person.firstName} ${person.lastName}`;
+}
+
+function contactShiftLabel(row: ContactShiftRow): string {
+  const start = formatInstantInZone(row.starts_at_utc, row.tz);
+  const end = formatInstantInZone(row.ends_at_utc, row.tz);
+  const comma = start.dateLabel.indexOf(', ');
+  const date = comma === -1 ? start.dateLabel : start.dateLabel.slice(comma + 2);
+  const publicity = row.published === 1 ? '' : ' (not on the public list)';
+  const state = row.status === 'cancelled' ? ' (cancelled)' : row.cancelled === 1 ? ' (shift cancelled)' : '';
+  return `${row.title}: ${row.role}, ${date}, ${start.timeLabel} to ${end.timeLabel} ${end.abbreviation}${publicity}${state}`;
 }
 
 function columnIndex(cells: string[]): { first: number; last: number; email: number; phone: number } | null {

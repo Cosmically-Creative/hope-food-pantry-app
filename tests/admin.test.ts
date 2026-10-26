@@ -630,10 +630,11 @@ describe('coordinator screens', () => {
     expect(sourceRoster).not.toContain(`/admin/signups/${signupId}/move`);
     expect(sourceRoster).toContain('0/2 spots filled');
     expect(sourceRoster).toContain('event-pill is-open');
-    const home = await (await app.request('/')).text();
+    const home = await (await app.request('/e/pantry?view=calendar')).text();
     const shiftPage = await (await app.request(`/s/${destinationId}`)).text();
     expect(home).not.toContain('kim@example.invalid');
-    expect(home).not.toContain('Kim Example');
+    expect(home).not.toContain('Blue shirt');
+    expect(home).toContain('Kim Example');
     expect(shiftPage).not.toContain('kim@example.invalid');
     expect(shiftPage).not.toContain('Attended.');
     expect(auditJson(db)).not.toContain('@');

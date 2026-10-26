@@ -1,5 +1,12 @@
+import { Temporal } from '@js-temporal/polyfill';
 import type Database from 'better-sqlite3';
-import { formatInstantInZone } from './time.js';
+import { isWithinSignupWindow } from './signup-window.js';
+import { formatInstantInZone, todayInZone } from './time.js';
+
+/** Weekday 0 is Sunday, matching the zoned clock. The public sign-up cards use Wednesday. */
+export const WEDNESDAY = 3;
+
+const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
 
 export type PublicShift = {
   id: number;
@@ -13,6 +20,9 @@ export type PublicShift = {
   cancelled: boolean;
   ended: boolean;
   inProgress: boolean;
+  /** The shift starts more than three months from today in the event time zone. */
+  tooEarly: boolean;
+  volunteers: string[];
   event: {
     id: number;
     slug: string;
@@ -29,6 +39,8 @@ export type PublicShift = {
     startLabel: string;
     endLabel: string;
     abbreviation: string;
+    weekday: number;
+    weekdayLabel: string;
   };
 };
 
@@ -107,6 +119,7 @@ export function getPublishedEvent(db: Database.Database, slug: string, now: stri
        ORDER BY s.starts_at_utc, s.role, s.id`,
     )
     .all(event.id, now) as ShiftRow[];
+  const names = volunteerNamesByShift(db, rows.map((row) => row.id));
   return {
     id: event.id,
     slug: event.slug,
@@ -114,7 +127,9 @@ export function getPublishedEvent(db: Database.Database, slug: string, now: stri
     description: event.description,
     location: event.location,
     timeZone: event.tz,
-    shifts: rows.map((row) => presentShift(row, now)),
+    shifts: rows
+      .map((row) => presentShift(row, now, names.get(row.id) ?? []))
+      .filter((shift) => !shift.tooEarly),
   };
 }
 
@@ -127,7 +142,9 @@ export function getPublicShift(db: Database.Database, id: number, now: string): 
        GROUP BY s.id`,
     )
     .get(id) as ShiftRow | undefined;
-  return row ? presentShift(row, now) : null;
+  if (!row) return null;
+  const names = volunteerNamesByShift(db, [row.id]);
+  return presentShift(row, now, names.get(row.id) ?? []);
 }
 
 export function spotsSentence(shift: Pick<PublicShift, 'occupied' | 'capacity'>): string {
@@ -135,7 +152,7 @@ export function spotsSentence(shift: Pick<PublicShift, 'occupied' | 'capacity'>)
   return `${filled}/${shift.capacity} spots filled`;
 }
 
-function presentShift(row: ShiftRow, now: string): PublicShift {
+function presentShift(row: ShiftRow, now: string, volunteers: string[]): PublicShift {
   const start = formatInstantInZone(row.starts_at_utc, row.tz);
   const end = formatInstantInZone(row.ends_at_utc, row.tz);
   const occupied = Number(row.occupied);
@@ -144,6 +161,8 @@ function presentShift(row: ShiftRow, now: string): PublicShift {
   const cancelled = row.cancelled === 1;
   const ended = row.ends_at_utc <= now;
   const inProgress = !cancelled && !ended && row.starts_at_utc <= now;
+  const today = todayInZone(row.tz, Temporal.Instant.from(now));
+  const tooEarly = !isWithinSignupWindow(start.date, today);
   return {
     id: row.id,
     role: row.role,
@@ -156,6 +175,8 @@ function presentShift(row: ShiftRow, now: string): PublicShift {
     cancelled,
     ended,
     inProgress,
+    tooEarly,
+    volunteers,
     event: {
       id: row.event_id,
       slug: row.slug,
@@ -172,6 +193,29 @@ function presentShift(row: ShiftRow, now: string): PublicShift {
       startLabel: start.timeLabel,
       endLabel: end.timeLabel,
       abbreviation: start.abbreviation,
+      weekday: start.weekday,
+      weekdayLabel: WEEKDAY_LABELS[start.weekday] ?? 'Day',
     },
   };
+}
+
+function volunteerNamesByShift(db: Database.Database, shiftIds: number[]): Map<number, string[]> {
+  const names = new Map<number, string[]>();
+  if (shiftIds.length === 0) return names;
+  const marks = shiftIds.map(() => '?').join(', ');
+  const rows = db
+    .prepare(
+      `SELECT shift_id AS shift_id, name AS name
+       FROM signups
+       WHERE status = 'confirmed' AND anonymized_at IS NULL AND name IS NOT NULL
+         AND shift_id IN (${marks})
+       ORDER BY name COLLATE NOCASE, id`,
+    )
+    .all(...shiftIds) as { shift_id: number; name: string }[];
+  for (const row of rows) {
+    const listed = names.get(row.shift_id);
+    if (listed) listed.push(row.name);
+    else names.set(row.shift_id, [row.name]);
+  }
+  return names;
 }

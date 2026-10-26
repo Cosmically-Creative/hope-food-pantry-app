@@ -77,14 +77,14 @@ describe('weekly template editing', () => {
     const generated = await postGenerate(app, eventId, cookie);
     expect(generated.status).toBe(303);
     const wednesdays = count(db, "SELECT COUNT(*) AS n FROM shifts WHERE role = 'Sorting'");
-    expect(wednesdays).toBe(9);
+    expect(wednesdays).toBe(14);
 
     const friday = await postTemplate(app, eventId, cookie, { weekday: '5', role: 'Intake', capacity: '4' });
     expect(friday.headers.get('location')).toBe(`/admin/events/${eventId}?notice=template-saved`);
     await postGenerate(app, eventId, cookie);
     expect(count(db, "SELECT COUNT(*) AS n FROM shifts WHERE role = 'Sorting'")).toBe(wednesdays);
-    expect(count(db, "SELECT COUNT(*) AS n FROM shifts WHERE role = 'Intake' AND capacity = 4")).toBe(8);
-    expect(count(db, "SELECT COUNT(*) AS n FROM shifts WHERE template_revision = 1")).toBe(wednesdays + 8);
+    expect(count(db, "SELECT COUNT(*) AS n FROM shifts WHERE role = 'Intake' AND capacity = 4")).toBe(13);
+    expect(count(db, "SELECT COUNT(*) AS n FROM shifts WHERE template_revision = 1")).toBe(wednesdays + 13);
 
     const templateId = (
       db.prepare("SELECT id AS id FROM shift_templates WHERE role = 'Intake'").get() as { id: number }
@@ -95,14 +95,14 @@ describe('weekly template editing', () => {
       revision: 2,
       role: 'Packing',
     });
-    expect(count(db, "SELECT COUNT(*) AS n FROM shifts WHERE role = 'Intake'")).toBe(8);
+    expect(count(db, "SELECT COUNT(*) AS n FROM shifts WHERE role = 'Intake'")).toBe(13);
 
     const ended = await postEnd(app, eventId, templateId, cookie);
     expect(ended.headers.get('location')).toBe(`/admin/events/${eventId}?notice=template-ended`);
     const page = await app.request(`/admin/events/${eventId}?notice=template-ended`, { headers: { cookie } });
     const html = await page.text();
     expect(html).toContain('This weekly template has ended. Shifts already on the schedule stay.');
-    expect(count(db, "SELECT COUNT(*) AS n FROM shifts WHERE role = 'Intake'")).toBe(8);
+    expect(count(db, "SELECT COUNT(*) AS n FROM shifts WHERE role = 'Intake'")).toBe(13);
     expect(count(db, 'SELECT COUNT(*) AS n FROM outbox')).toBe(1);
   });
 });

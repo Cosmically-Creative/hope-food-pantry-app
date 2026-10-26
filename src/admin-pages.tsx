@@ -12,6 +12,7 @@ import {
   type ContactImportSummary,
   type ContactManualErrors,
   type ContactManualValues,
+  type ContactShift,
 } from './contacts.js';
 import type { SignupErrors, SignupValues } from './signup-form.js';
 import { addLocalDays, formatInstantInZone, todayInZone } from './time.js';
@@ -458,6 +459,19 @@ function contactListHref(config: AppConfig, query: string, shown: number): strin
   return `${appPath(config, '/admin/contacts')}?${params.toString()}#contact-more`;
 }
 
+function ContactShiftList(props: { config: AppConfig; shifts: ContactShift[]; empty: string }) {
+  if (props.shifts.length === 0) return <p class="empty">{props.empty}</p>;
+  return (
+    <ul class="contact-shift-list">
+      {props.shifts.map((shift) => (
+        <li key={shift.signupId}>
+          <a href={appPath(props.config, `/admin/shifts/${shift.shiftId}`)}>{shift.label}</a>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function ContactsPage(props: {
   config: AppConfig;
   csrf: string;
@@ -482,6 +496,8 @@ export function ContactsPage(props: {
           : `${props.total} people`;
   const hiddenSkips = props.summary ? Math.max(0, props.summary.skipped - props.summary.skips.length) : 0;
   const moreHref = contactListHref(props.config, props.query, props.limit + CONTACT_LIST_PAGE);
+  const addOpen = Object.keys(manual.errors).length > 0;
+  const importOpen = Boolean(props.importError);
   return (
     <>
       <Crumb items={[{ href: appPath(props.config, '/admin'), label: 'Coordinator' }, { label: 'Contacts' }]} />
@@ -495,42 +511,11 @@ export function ContactsPage(props: {
         </ul>
       ) : null}
       {hiddenSkips > 0 ? <p class="panel-note">{hiddenSkips === 1 ? '1 more row was skipped.' : `${hiddenSkips} more rows were skipped.`}</p> : null}
-      <p>
-        Someone who signs up is saved here. Cancelling that signup does not remove them. A different name is a separate contact, even when the email matches. To add someone who has not signed up, import a spreadsheet or save them below. That does not take a spot and does not send email. Choose a name to correct that person or add them to an open shift. Old signups lose their details after the retention period. This list stays until you remove someone.
-      </p>
-      <form method="post" action={appPath(props.config, '/admin/contacts/new')} class="signup-form desk-download">
-        <input type="hidden" name="csrf" value={props.csrf} />
-        <h2>Add a contact</h2>
-        <p>This saves one person. It does not sign them up and does not send email. The same name and email updates that person. A different name is saved separately, even with the same email. Names are capitalized. A 10-digit phone is saved with dashes, like 712-555-0100.</p>
-        <WalkInField id="contact-first" label="First name" name="first_name" type="text" value={manual.values.firstName} error={manual.errors.firstName} />
-        <WalkInField id="contact-last" label="Last name" name="last_name" type="text" value={manual.values.lastName} error={manual.errors.lastName} />
-        <WalkInField id="contact-email" label="Email" name="email" type="email" value={manual.values.email} error={manual.errors.email} />
-        <WalkInField id="contact-phone" label="Phone" name="phone" type="tel" value={manual.values.phone} error={manual.errors.phone} required />
-        <button type="submit">Save this contact</button>
-      </form>
-      <form method="post" action={appPath(props.config, '/admin/contacts/import')} class="signup-form desk-download" enctype="multipart/form-data">
-        <input type="hidden" name="csrf" value={props.csrf} />
-        <h2>Import a contact list</h2>
-        <p>
-          Use a spreadsheet with First Name, Last Name, Email, and Phone. The SignUpGenius people export works. Address is ignored. The same name and email updates that person. A different name stays a separate person, even when the email matches. A different email stays a separate person, even when the name matches. A row without a phone is skipped. Names are capitalized. A 10-digit phone is saved with dashes, like 712-555-0100. Email addresses are stored in lowercase. The file has to be under 64 KB.
-        </p>
-        {props.importError ? <p class="error">{props.importError}</p> : null}
-        <label>
-          Spreadsheet
-          <input name="file" type="file" accept=".csv,text/csv,text/plain" required />
-        </label>
-        <button type="submit">Import this list</button>
-      </form>
-      <form method="post" action={appPath(props.config, '/admin/contacts/export')} class="signup-form desk-download">
-        <input type="hidden" name="csrf" value={props.csrf} />
-        <h2>Download contacts</h2>
-        <p>A downloaded copy stays on your computer. This app does not delete it later. The Address column is blank. A cell that would be a spreadsheet formula is saved as text.</p>
-        <button type="submit">Download contacts</button>
-      </form>
       <section class="desk-events" aria-labelledby="contacts-heading">
         <h2 id="contacts-heading">{heading}</h2>
+        <div class="contact-toolbar">
         {props.total > 0 ? (
-          <form method="get" action={appPath(props.config, '/admin/contacts')} class="signup-form desk-download">
+          <form method="get" action={appPath(props.config, '/admin/contacts')} class="signup-form desk-download contact-find">
             <div class="desk-range">
               <label>
                 Find
@@ -542,6 +527,53 @@ export function ContactsPage(props: {
         ) : (
           <p class="empty">No contacts yet.</p>
         )}
+        <div class="contact-actions">
+        <details class="contact-menu" name="contact-tools" open={addOpen ? true : undefined}>
+          <summary>
+            Add a contact
+            <span class="edit-chevron" aria-hidden="true" />
+          </summary>
+          <form method="post" action={appPath(props.config, '/admin/contacts/new')} class="signup-form">
+            <input type="hidden" name="csrf" value={props.csrf} />
+            <p>This saves one person. It does not sign them up and does not send email. The same name and email updates that person. A different name is saved separately, even with the same email. Names are capitalized. A 10-digit phone is saved with dashes, like 712-555-0100.</p>
+            <WalkInField id="contact-first" label="First name" name="first_name" type="text" value={manual.values.firstName} error={manual.errors.firstName} />
+            <WalkInField id="contact-last" label="Last name" name="last_name" type="text" value={manual.values.lastName} error={manual.errors.lastName} />
+            <WalkInField id="contact-email" label="Email" name="email" type="email" value={manual.values.email} error={manual.errors.email} />
+            <WalkInField id="contact-phone" label="Phone" name="phone" type="tel" value={manual.values.phone} error={manual.errors.phone} required />
+            <button type="submit">Save this contact</button>
+          </form>
+        </details>
+        <details class="contact-menu" name="contact-tools" open={importOpen ? true : undefined}>
+          <summary>
+            Import
+            <span class="edit-chevron" aria-hidden="true" />
+          </summary>
+          <form method="post" action={appPath(props.config, '/admin/contacts/import')} class="signup-form" enctype="multipart/form-data">
+            <input type="hidden" name="csrf" value={props.csrf} />
+            <p>
+              Use a spreadsheet with First Name, Last Name, Email, and Phone. The SignUpGenius people export works. Address is ignored. The same name and email updates that person. A different name stays a separate person, even when the email matches. A different email stays a separate person, even when the name matches. A row without a phone is skipped. Names are capitalized. A 10-digit phone is saved with dashes, like 712-555-0100. Email addresses are stored in lowercase. The file has to be under 64 KB.
+            </p>
+            {props.importError ? <p class="error">{props.importError}</p> : null}
+            <label>
+              Spreadsheet
+              <input name="file" type="file" accept=".csv,text/csv,text/plain" required />
+            </label>
+            <button type="submit">Import this list</button>
+          </form>
+        </details>
+        <details class="contact-menu" name="contact-tools">
+          <summary>
+            Download
+            <span class="edit-chevron" aria-hidden="true" />
+          </summary>
+          <form method="post" action={appPath(props.config, '/admin/contacts/export')} class="signup-form">
+            <input type="hidden" name="csrf" value={props.csrf} />
+            <p>A downloaded copy stays on your computer. This app does not delete it later. The Address column is blank. A cell that would be a spreadsheet formula is saved as text.</p>
+            <button type="submit">Download contacts</button>
+          </form>
+        </details>
+        </div>
+        </div>
         {props.total > 0 && props.people.length === 0 ? <p class="empty">No contacts match.</p> : null}
         {props.people.length > 0 ? (
           <ul class="contact-list" id="contacts-list">
@@ -580,6 +612,7 @@ export function ContactPage(props: {
   config: AppConfig;
   csrf: string;
   contact: Contact;
+  signedUp: { current: ContactShift[]; past: ContactShift[] };
   shifts: MoveTarget[];
   form: WalkInState;
   shiftId: string;
@@ -599,6 +632,8 @@ export function ContactPage(props: {
     },
     errors: {},
   };
+  const editOpen = Object.keys(correction.errors).length > 0;
+  const addOpen = Boolean(props.error || props.form.message || errorEntries.length > 0 || props.shiftId);
   return (
     <>
       <Crumb
@@ -612,62 +647,76 @@ export function ContactPage(props: {
       <p>{props.contact.email}</p>
       {props.contact.phone ? <p>{props.contact.phone}</p> : null}
       <Notice notice={props.notice} />
-      <form method="post" action={appPath(props.config, `/admin/contacts/${props.contact.id}`)} class="signup-form">
-        <input type="hidden" name="csrf" value={props.csrf} />
-        <h2>Correct this contact</h2>
-        <p>
-          This changes the saved person. A different name stays this contact and does not create a second person. It does not change a signup, take a spot, or send email. Names are capitalized. A 10-digit phone is saved with dashes, like 712-555-0100.
-        </p>
-        <WalkInField id="correct-first" label="First name" name="first_name" type="text" value={correction.values.firstName} error={correction.errors.firstName} />
-        <WalkInField id="correct-last" label="Last name" name="last_name" type="text" value={correction.values.lastName} error={correction.errors.lastName} />
-        <WalkInField id="correct-email" label="Email" name="email" type="email" value={correction.values.email} error={correction.errors.email} />
-        <WalkInField
-          id="correct-phone"
-          label="Phone"
-          name="phone"
-          type="tel"
-          value={correction.values.phone}
-          error={correction.errors.phone}
-          required
-        />
-        <button type="submit">Save this correction</button>
-      </form>
-      {props.error ? <p class="error">{props.error}</p> : null}
-      <h2>Add to a shift</h2>
-      <p>Choose an open shift. This uses their saved name, email, and phone. It takes one spot and queues a confirmation email. Their name stays off the public list. Full, cancelled, and ended shifts are left off this list, and so is a shift they are already on.</p>
-      {props.shifts.length > 0 ? (
-        <form method="post" action={appPath(props.config, `/admin/contacts/${props.contact.id}/add`)} class="signup-form">
-          {props.form.message ? <p class="error">{props.form.message}</p> : null}
-          {errorEntries.length > 0 ? (
-            <div class="error" role="alert">
-              <p>Check these fields:</p>
-              <ul>
-                {errorEntries.map(([field, message]) => (
-                  <li key={field}>{message}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
+      <h2>Signed up for</h2>
+      <ContactShiftList config={props.config} shifts={props.signedUp.current} empty="Not signed up for a shift." />
+      <h2>Past shifts</h2>
+      <ContactShiftList config={props.config} shifts={props.signedUp.past} empty="No past shifts." />
+      <div class="contact-actions">
+      <details class="contact-menu" name="contact-action" open={editOpen ? true : undefined}>
+        <summary>
+          Edit contact
+          <span class="edit-chevron" aria-hidden="true" />
+        </summary>
+        <form method="post" action={appPath(props.config, `/admin/contacts/${props.contact.id}`)} class="signup-form">
           <input type="hidden" name="csrf" value={props.csrf} />
-          <input type="hidden" name="form_token" value={props.form.token} />
-          <label for="add-shift">
-            Shift
-            <select id="add-shift" name="shift" required>
-              <ShiftTargetOptions targets={props.shifts} selectedId={props.shiftId} />
-            </select>
-          </label>
-          <label for="add-notes">
-            Notes (optional)
-            <textarea id="add-notes" name="notes" aria-invalid={errors.notes ? 'true' : undefined}>
-              {values.notes}
-            </textarea>
-            {errors.notes ? <span class="field-error">{errors.notes}</span> : null}
-          </label>
-          <button type="submit">Add to this shift</button>
+          <p>This changes the saved person. It does not change a signup, take a spot, or send email.</p>
+          <WalkInField id="correct-first" label="First name" name="first_name" type="text" value={correction.values.firstName} error={correction.errors.firstName} />
+          <WalkInField id="correct-last" label="Last name" name="last_name" type="text" value={correction.values.lastName} error={correction.errors.lastName} />
+          <WalkInField id="correct-email" label="Email" name="email" type="email" value={correction.values.email} error={correction.errors.email} />
+          <WalkInField
+            id="correct-phone"
+            label="Phone"
+            name="phone"
+            type="tel"
+            value={correction.values.phone}
+            error={correction.errors.phone}
+            required
+          />
+          <button type="submit">Save contact</button>
         </form>
-      ) : (
-        <p class="empty">No open shift is available.</p>
-      )}
+      </details>
+      <details class="contact-menu" name="contact-action" open={addOpen ? true : undefined}>
+        <summary>
+          Add to a shift
+          <span class="edit-chevron" aria-hidden="true" />
+        </summary>
+        {props.error ? <p class="error">{props.error}</p> : null}
+        {props.shifts.length > 0 ? (
+          <form method="post" action={appPath(props.config, `/admin/contacts/${props.contact.id}/add`)} class="signup-form">
+            <p>This uses their saved name, email, and phone. It takes one spot and queues a confirmation email.</p>
+            {props.form.message ? <p class="error">{props.form.message}</p> : null}
+            {errorEntries.length > 0 ? (
+              <div class="error" role="alert">
+                <p>Check these fields:</p>
+                <ul>
+                  {errorEntries.map(([field, message]) => (
+                    <li key={field}>{message}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <input type="hidden" name="csrf" value={props.csrf} />
+            <input type="hidden" name="form_token" value={props.form.token} />
+            <label for="add-shift">
+              Shift
+              <select id="add-shift" name="shift" required>
+                <ShiftTargetOptions targets={props.shifts} selectedId={props.shiftId} />
+              </select>
+            </label>
+            <label for="add-notes">
+              Notes (optional)
+              <textarea id="add-notes" name="notes" aria-invalid={errors.notes ? 'true' : undefined}>
+                {values.notes}
+              </textarea>
+              {errors.notes ? <span class="field-error">{errors.notes}</span> : null}
+            </label>
+            <button type="submit">Add to this shift</button>
+          </form>
+        ) : (
+          <p class="empty">No open shift is available.</p>
+        )}
+      </details>
+      </div>
     </>
   );
 }
@@ -1195,7 +1244,7 @@ function ShiftList(props: { config: AppConfig; event: AdminEvent; csrf: string; 
             <details class="help-tip">
               <summary aria-label="About upcoming shifts">?</summary>
               <p>
-                Shifts show on the public list when this event is public, the shift is not cancelled, and it has not ended. Repeating shifts add dates for the next eight weeks. Add weekly shifts fills those dates. Shifts already on the schedule stay as they are, including cancelled ones.
+                Shifts show on the public list when this event is public, the shift is not cancelled, and it has not ended. Repeating shifts add dates for the next three months. Add weekly shifts fills those dates. Shifts already on the schedule stay as they are, including cancelled ones.
               </p>
             </details>
           </div>
@@ -1374,7 +1423,7 @@ function WeeklyTemplates(props: { config: AppConfig; event: AdminEvent; csrf: st
         <div>
           <h2 id="templates-heading">Repeating shifts</h2>
           <p class="event-panel-note">
-            Each one adds 8 weeks ahead.{' '}
+            Each one adds three months ahead.{' '}
             <button type="submit" class="text-action" form="add-weekly">
               Add weekly shifts
             </button>
@@ -1603,7 +1652,7 @@ function WalkInForm(props: { config: AppConfig; csrf: string; shiftId: number; f
   return (
     <form method="post" action={appPath(props.config, `/admin/shifts/${props.shiftId}/walk-in`)} class="signup-form event-details-form">
       <h2 id="walkin-heading">Add a walk-in</h2>
-      <p>This is one person who is here. It takes one spot and queues a confirmation email. Another person can use the same email. Their name stays off the public list.</p>
+      <p>This is one person who is here. It takes one spot and queues a confirmation email. Another person can use the same email. Their name is listed on the public sign-up page when this shift is posted there. Email and notes stay off that page.</p>
       {props.form.message ? <p class="error">{props.form.message}</p> : null}
       {errorEntries.length > 0 ? (
         <div class="error" role="alert">
@@ -1890,7 +1939,7 @@ const NOTICES: Record<string, string> = {
   'no-show': 'Marked as a no-show.',
   'attendance-cleared': 'The attendance mark is cleared.',
   moved: 'They are on this shift. A change email is queued.',
-  generated: 'Weekly shifts for the next eight weeks are on the schedule. Existing shifts were left as they are.',
+  generated: 'Weekly shifts for the next three months are on the schedule. Existing shifts were left as they are.',
   'no-template': 'There is no active weekly template.',
   'template-saved': 'The weekly template is saved. Shifts already on the schedule were not changed.',
   'template-ended': 'This weekly template has ended. Shifts already on the schedule stay.',

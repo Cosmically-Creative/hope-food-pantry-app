@@ -5,7 +5,8 @@ import { rememberSignupContact } from './contacts.js';
 import { normalizeEmail } from './email.js';
 import { queueCancellation, queueConfirmation, cancelPendingConfirmations, cancelPendingReminders } from './mail/queue.js';
 import type { MailIdentity } from './mail/types.js';
-import { formatInstantInZone, formatUtc, type ZonedClock } from './time.js';
+import { isWithinSignupWindow } from './signup-window.js';
+import { formatInstantInZone, formatUtc, todayInZone, type ZonedClock } from './time.js';
 
 const MANAGE_TOKEN_TTL_HOURS = 24 * 7;
 
@@ -25,7 +26,7 @@ export type ReserveInput = {
 
 export type ReserveResult =
   | { ok: true; signupId: number; manageToken: string | null; replay: boolean }
-  | { ok: false; reason: 'not_found' | 'closed' | 'full' | 'duplicate' | 'conflict' };
+  | { ok: false; reason: 'not_found' | 'closed' | 'early' | 'full' | 'duplicate' | 'conflict' };
 
 export type ManageView = {
   signupId: number;
@@ -167,6 +168,11 @@ function placeReservation(db: Database.Database, input: ReserveInput, emailNorm:
   const coordinator = input.audience === 'coordinator';
   if (!shift || (!coordinator && shift.published !== 1)) return { ok: false, reason: 'not_found' };
   if (shift.cancelled === 1 || shift.ends_at_utc <= input.now) return { ok: false, reason: 'closed' };
+  if (!coordinator) {
+    const start = formatInstantInZone(shift.starts_at_utc, shift.tz);
+    const today = todayInZone(shift.tz, Temporal.Instant.from(input.now));
+    if (!isWithinSignupWindow(start.date, today)) return { ok: false, reason: 'early' };
+  }
 
   const existing = findOperation(db, operationKey);
   if (existing) {

@@ -82,7 +82,9 @@ describe('manage-link cancellation', () => {
       { status: 'confirmed' },
     ]);
     expect((await (await app.request(`/s/${shiftId}`)).text())).toContain('1/1 spots filled');
-    expect((await (await app.request('/')).text())).not.toContain('Pat Cancel');
+    const listed = await (await app.request('/?view=calendar')).text();
+    expect(listed).toContain('Pat Cancel');
+    expect(listed).not.toContain('pat.cancel@example.invalid');
   });
 
   it('refuses a cancel that did not come from this signup page', async () => {
@@ -207,9 +209,9 @@ describe('manage-link switch', () => {
     expect(letter.body_text).toContain('You switched this signup to a different shift.');
     expect(letter.body_text).not.toContain('A coordinator moved');
     expect(letter.body_text).toContain(nextPath.split('?')[0]);
-    const home = await (await app.request('/')).text();
+    const home = await (await app.request('/?view=calendar')).text();
     expect(home).not.toContain('pat.switch@example.invalid');
-    expect(home).not.toContain('Pat Cancel');
+    expect(home).toContain('Pat Cancel');
     expect(home).toContain('0/2 spots filled');
     expect(home).toContain('1/2 spots filled');
 

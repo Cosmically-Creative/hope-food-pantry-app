@@ -36,7 +36,7 @@ async function main(): Promise<void> {
     }
     const expanded = expandTemplates(database, startedAt);
     if (expanded.created > 0) {
-      console.log(`Added ${expanded.created} weekly shifts for the next eight weeks.`);
+      console.log(`Added ${expanded.created} weekly shifts for the next three months.`);
     }
     for (const skip of expanded.skipped) console.error(skip);
     runRetention(database, startedAt);

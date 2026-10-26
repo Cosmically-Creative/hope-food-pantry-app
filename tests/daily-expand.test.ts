@@ -32,15 +32,15 @@ describe('daily weekly refill', () => {
     const ended = insertEvent(db, 'ended', CHICAGO);
     insertTemplate(db, ended, 4, '2026-01-15', 0);
 
-    expect(runDueTemplateExpansion(db, BEFORE)).toEqual({ zones: [HONOLULU], created: 9, skipped: [] });
+    expect(runDueTemplateExpansion(db, BEFORE)).toEqual({ zones: [HONOLULU], created: 13, skipped: [] });
     expect(shiftCount(db, chicago)).toBe(0);
-    expect(shiftCount(db, honolulu)).toBe(9);
+    expect(shiftCount(db, honolulu)).toBe(13);
     expect(shiftCount(db, ended)).toBe(0);
     expect(marks(db)).toEqual([{ scope: HONOLULU, local_date: '2026-01-14' }]);
 
     expect(runDueTemplateExpansion(db, AT_ONE).zones).toEqual([CHICAGO]);
-    expect(shiftCount(db, chicago)).toBe(9);
-    expect(shiftCount(db, honolulu)).toBe(9);
+    expect(shiftCount(db, chicago)).toBe(13);
+    expect(shiftCount(db, honolulu)).toBe(13);
     expect(shiftCount(db, ended)).toBe(0);
     expect(runDueTemplateExpansion(db, AT_ONE)).toEqual({ zones: [], created: 0, skipped: [] });
     expect(marks(db)).toEqual([
@@ -63,11 +63,11 @@ describe('daily weekly refill', () => {
     runDueTemplateExpansion(db, AT_ONE);
     const kept = db.prepare(`SELECT role AS role, cancelled AS cancelled FROM shifts WHERE occurrence_date = '2026-01-15'`).get();
     expect(kept).toEqual({ role: 'Kept', cancelled: 1 });
-    expect(lastDate(db, eventId)).toBe('2026-03-12');
+    expect(lastDate(db, eventId)).toBe('2026-04-09');
 
     runDueTemplateExpansion(db, NEXT_WEEK);
-    expect(lastDate(db, eventId)).toBe('2026-03-19');
-    expect(shiftCount(db, eventId)).toBe(10);
+    expect(lastDate(db, eventId)).toBe('2026-04-16');
+    expect(shiftCount(db, eventId)).toBe(14);
     expect(db.prepare(`SELECT detail_json AS detail_json FROM audit`).all().map((row) => (row as { detail_json: string }).detail_json).join(' ')).not.toContain('@');
   });
 
@@ -109,7 +109,7 @@ describe('daily weekly refill', () => {
     } finally {
       console.error = write;
     }
-    expect(shiftCount(db, chicago)).toBe(9);
+    expect(shiftCount(db, chicago)).toBe(13);
     expect(shiftCount(db, broken)).toBe(0);
     expect(marks(db).map((row) => row.scope)).toEqual([CHICAGO]);
     expect(errors.join(' ')).toContain('Not/AZone');
@@ -121,9 +121,9 @@ describe('daily weekly refill', () => {
     const eventId = insertEvent(db, 'chicago', CHICAGO);
     insertTemplate(db, eventId, 4, '2026-01-15');
     const runner = startDailyExpansionRunner(db, () => AT_ONE);
-    expect(shiftCount(db, eventId)).toBe(9);
+    expect(shiftCount(db, eventId)).toBe(13);
     runner.stop();
-    expect(shiftCount(db, eventId)).toBe(9);
+    expect(shiftCount(db, eventId)).toBe(13);
   });
 });
 

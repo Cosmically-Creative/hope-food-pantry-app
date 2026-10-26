@@ -26,6 +26,7 @@ import {
 } from './pages.js';
 import { recordInvalidManageToken, recordSignupEmail, recordSignupIp, recordSwitchAttempt } from './rate-limit.js';
 import { getPublicShift, type PublicShift } from './schedule.js';
+import { SIGNUP_TOO_EARLY } from './signup-window.js';
 import { EMPTY_SIGNUP, parseSignupForm, type SignupErrors, type SignupValues } from './signup-form.js';
 import type { MailIdentity } from './mail/types.js';
 import { disableReminders } from './reminders.js';
@@ -106,6 +107,7 @@ async function submitSignup(c: Context, services: SignupServices): Promise<Respo
   const now = services.now();
   const shift = loadShift(services, c.req.param('id') ?? '');
   if (!shift) return html(c, services, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
+  if (shift.tooEarly) return shiftResponse(c, services, shift, 400, null, SIGNUP_TOO_EARLY);
   const ip = clientAddress(config.trustProxy, peerAddress(c, services.clientIp), c.req.header('x-forwarded-for'));
   if (!originAllowed(c, config.baseUrl)) {
     return shiftResponse(c, services, shift, 403, formFor(services, shift, EMPTY_SIGNUP, {}, null), ORIGIN);
@@ -168,6 +170,7 @@ async function submitSignup(c: Context, services: SignupServices): Promise<Respo
     if (reserved.ok) return redirectConfirmed(c, services, shift.id, reserved.manageToken ? { signupId: reserved.signupId, token: reserved.manageToken } : null);
     if (reserved.reason === 'not_found') return html(c, services, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
     if (reserved.reason === 'closed') return shiftResponse(c, services, loadShift(services, String(shift.id)) ?? shift, 400, null, CLOSED);
+    if (reserved.reason === 'early') return shiftResponse(c, services, loadShift(services, String(shift.id)) ?? shift, 400, null, SIGNUP_TOO_EARLY);
     if (reserved.reason === 'full') return shiftResponse(c, services, loadShift(services, String(shift.id)) ?? shift, 409, null, FULL);
     if (reserved.reason === 'duplicate') {
       return shiftResponse(c, services, shift, 409, formFor(services, shift, values, {}, null), ALREADY_SIGNED_UP);
@@ -210,7 +213,7 @@ function shiftResponse(
 ) {
   if (retryAfter !== undefined) c.header('Retry-After', String(retryAfter));
   const current = loadShift(services, String(shift.id)) ?? shift;
-  const showForm = signup !== null && !current.cancelled && !current.ended && !current.full;
+  const showForm = signup !== null && !current.cancelled && !current.ended && !current.full && !current.tooEarly;
   return html(
     c,
     services,
@@ -222,7 +225,7 @@ function shiftResponse(
 }
 
 function blankForm(services: SignupServices, shift: PublicShift): SignupFormView | null {
-  if (shift.cancelled || shift.ended || shift.full) return null;
+  if (shift.cancelled || shift.ended || shift.full || shift.tooEarly) return null;
   return formFor(services, shift, EMPTY_SIGNUP, {}, null);
 }
 
@@ -400,6 +403,7 @@ function switchForm(services: SignupServices, token: string, signup: { status: '
   if (signup.status !== 'confirmed') return null;
   const targets = listMoveTargets(services.db, signup.eventId, signup.shiftId, services.now(), {
     publishedOnly: true,
+    signupWindow: true,
   });
   if (targets.length === 0) return { action: '', token: '', formToken: '', targets };
   return {

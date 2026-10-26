@@ -190,9 +190,9 @@ describe('transactional mail', () => {
       body,
     });
     expect(saved.status).toBe(303);
-    const home = await (await app.request('/')).text();
+    const home = await (await app.request('/?view=calendar')).text();
     expect(home).not.toContain('listed@example.invalid');
-    expect(home).not.toContain('Listed Person');
+    expect(home).toContain('Listed Person');
     expect(db.prepare("SELECT status FROM outbox").get()).toEqual({ status: 'pending' });
   });
 });

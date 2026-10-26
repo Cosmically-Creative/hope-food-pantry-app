@@ -107,7 +107,7 @@ export async function runSeedCli(env: NodeJS.ProcessEnv = process.env): Promise<
       `Event ${result.slug}: ${result.shiftIds.length} one-off shifts and ${result.signupIds.length} fake signups.`,
     );
     console.log('Each signup is one person. Another person can use the same email. Group size is fixed at 1.');
-    console.log('The weekly template is stored. Starting the app adds its shifts for the next eight weeks.');
+    console.log('The weekly template is stored. Starting the app adds its shifts for the next three months.');
     console.log('No coordinator account was created.');
   } finally {
     db.close();

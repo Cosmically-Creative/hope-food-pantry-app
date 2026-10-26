@@ -1,6 +1,7 @@
 (function () {
   bindNav();
   bindCalendar();
+  bindViewMenu();
   document.querySelectorAll('[data-contact]').forEach(bindContact);
   document.querySelectorAll('[data-see-more]').forEach(bindSeeMore);
 
@@ -20,6 +21,21 @@
     for (var i = 0; i < links.length; i += 1) links[i].addEventListener('click', close);
     document.addEventListener('keydown', function (event) {
       if (event.key === 'Escape') close();
+    });
+  }
+
+  function bindViewMenu() {
+    var menus = document.querySelectorAll('details.view-menu');
+    if (!menus.length) return;
+    document.addEventListener('click', function (event) {
+      for (var i = 0; i < menus.length; i += 1) {
+        if (!menus[i].open || menus[i].contains(event.target)) continue;
+        menus[i].open = false;
+      }
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return;
+      for (var i = 0; i < menus.length; i += 1) menus[i].open = false;
     });
   }
 

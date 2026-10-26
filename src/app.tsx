@@ -72,7 +72,7 @@ export function createApp(
       db,
       at,
       `${event.title} · Hope Volunteer`,
-      <EventPage config={config} event={event} now={at} month={c.req.query('month')} path="/" />,
+      <EventPage config={config} event={event} now={at} month={c.req.query('month')} view={c.req.query('view')} path="/" />,
     );
   });
 
@@ -96,7 +96,7 @@ export function createApp(
       db,
       at,
       `${event.title} · Hope Volunteer`,
-      <EventPage config={config} event={event} now={at} month={c.req.query('month')} />,
+      <EventPage config={config} event={event} now={at} month={c.req.query('month')} view={c.req.query('view')} />,
     );
   });
 
