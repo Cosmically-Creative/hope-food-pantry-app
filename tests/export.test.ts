@@ -34,8 +34,8 @@ describe('roster export', () => {
     const eventId = insertEvent(db, 'weekly', 'Weekly pantry');
     const shiftId = insertShift(db, eventId, '2026-10-15T14:00:00.000Z', '2026-10-15T17:00:00.000Z');
     const other = insertShift(db, eventId, '2026-10-17T14:00:00.000Z', '2026-10-17T17:00:00.000Z');
-    insertSignup(db, shiftId, { name: '=Ada', email: 'ada@example.invalid', notes: 'Blue, shirt', attended: 1 });
-    insertSignup(db, shiftId, { name: 'Ben', email: 'ben@example.invalid', status: 'cancelled', attended: 0 });
+    insertSignup(db, shiftId, { name: '=Ada', email: 'ada@example.invalid', notes: 'Blue, shirt' });
+    insertSignup(db, shiftId, { name: 'Ben', email: 'ben@example.invalid', status: 'cancelled' });
     insertSignup(db, shiftId, { name: null, email: null, anonymized: true });
     insertSignup(db, other, { name: 'Cam', email: 'cam@example.invalid' });
 
@@ -48,13 +48,12 @@ describe('roster export', () => {
     expect(text).toContain('"Blue, shirt"');
     expect(text).toContain('ada@example.invalid');
     expect(text).toContain('Cancelled');
-    expect(text).toContain('No-show');
-    expect(text).toContain('Attended');
+    expect(text).not.toContain('Attended');
     expect(text).toContain('2026-10-15');
     expect(text).toContain('America/Chicago (CDT)');
     expect(text).not.toContain('cam@example.invalid');
     expect(text).not.toContain('Cam');
-    const anonymized = text.split('\r\n').find((line) => line.includes(',Confirmed,') && !line.includes('@'));
+    const anonymized = text.split('\r\n').find((line) => line.endsWith(',Confirmed') && !line.includes('@'));
     expect(anonymized).toBeTruthy();
   });
 
@@ -173,7 +172,6 @@ function insertSignup(
     notes?: string | null;
     phone?: string | null;
     status?: string;
-    attended?: number | null;
     anonymized?: boolean;
   },
 ): void {
@@ -181,8 +179,8 @@ function insertSignup(
   db.prepare(
     `INSERT INTO signups (
        shift_id, name, email, email_norm, phone, is_minor, guardian_name, guardian_email, group_size, notes,
-       status, reminders_off, attended, created_at, updated_at, anonymized_at
-     ) VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, 1, ?, ?, 0, ?, ?, ?, ?)`,
+       status, reminders_off, created_at, updated_at, anonymized_at
+     ) VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, 1, ?, ?, 0, ?, ?, ?)`,
   ).run(
     shiftId,
     anonymized ? null : options.name,
@@ -191,7 +189,6 @@ function insertSignup(
     anonymized ? null : options.phone ?? null,
     anonymized ? null : options.notes ?? null,
     options.status ?? 'confirmed',
-    options.attended ?? null,
     NOW,
     NOW,
     anonymized ? NOW : null,

@@ -161,7 +161,6 @@ describe('manage-link switch', () => {
     const destinationId = insertShift(db, eventId, 'Distribution', '2026-10-17T14:00:00.000Z', '2026-10-17T17:00:00.000Z', 2);
     const { managePath } = await openManage(app, shiftId, 'pat.switch@example.invalid', '203.0.113.40');
     const signupId = Number((db.prepare('SELECT id AS id FROM signups').get() as { id: number }).id);
-    db.prepare('UPDATE signups SET attended = 1 WHERE id = ?').run(signupId);
     db.prepare(
       `INSERT INTO outbox (
          dedupe_key, signup_id, shift_id, kind, to_email, subject, body_text, body_html,
@@ -190,17 +189,15 @@ describe('manage-link switch', () => {
     expect(nextHtml).toContain('Confirmed');
     expect(await (await app.request(managePath)).status).toBe(404);
 
-    expect(db.prepare('SELECT status, attended, shift_id FROM signups WHERE id = ?').get(signupId)).toEqual({
+    expect(db.prepare('SELECT status, shift_id FROM signups WHERE id = ?').get(signupId)).toEqual({
       status: 'cancelled',
-      attended: 1,
       shift_id: shiftId,
     });
-    const created = db.prepare("SELECT status, attended, shift_id FROM signups WHERE status = 'confirmed'").get() as {
+    const created = db.prepare("SELECT status, shift_id FROM signups WHERE status = 'confirmed'").get() as {
       status: string;
-      attended: number | null;
       shift_id: number;
     };
-    expect(created).toEqual({ status: 'confirmed', attended: null, shift_id: destinationId });
+    expect(created).toEqual({ status: 'confirmed', shift_id: destinationId });
     expect(db.prepare("SELECT status FROM outbox WHERE kind = 'confirmation'").get()).toEqual({ status: 'cancelled' });
     expect(db.prepare("SELECT status FROM outbox WHERE kind = 'reminder'").get()).toEqual({ status: 'cancelled' });
     expect(db.prepare("SELECT COUNT(*) AS n FROM outbox WHERE kind = 'cancelled'").get()).toEqual({ n: 0 });

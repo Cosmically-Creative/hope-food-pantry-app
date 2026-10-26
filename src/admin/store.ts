@@ -88,7 +88,6 @@ export type RosterPerson = {
   phone: string | null;
   notes: string | null;
   status: 'confirmed' | 'cancelled';
-  attendance: 'attended' | 'no-show' | null;
 };
 
 export type AdminShift = AdminShiftSummary & {
@@ -292,7 +291,7 @@ export function getAdminShift(db: Database.Database, id: number): AdminShift | n
   if (!row) return null;
   const people = db
     .prepare(
-      `SELECT id, name, email, phone, notes, status, attended
+      `SELECT id, name, email, phone, notes, status
        FROM signups
        WHERE shift_id = ? AND anonymized_at IS NULL AND name IS NOT NULL AND email IS NOT NULL
        ORDER BY CASE status WHEN 'confirmed' THEN 0 ELSE 1 END, id`,
@@ -304,7 +303,6 @@ export function getAdminShift(db: Database.Database, id: number): AdminShift | n
     phone: string | null;
     notes: string | null;
     status: string;
-    attended: number | null;
   }>;
   return {
     ...presentShift(row, row.tz),
@@ -321,7 +319,6 @@ export function getAdminShift(db: Database.Database, id: number): AdminShift | n
         phone: person.phone,
         notes: person.notes,
         status: person.status,
-        attendance: person.attended === 1 ? 'attended' : person.attended === 0 ? 'no-show' : null,
       }];
     }),
   };
@@ -943,48 +940,6 @@ export function cancelSignupAsCoordinator(
     if (!token) return { ok: true, already: true, mailed: 0, shiftId: row.shift_id };
     writeAudit(db, coordinatorId, 'signup.cancel', { signupId: row.id, shiftId: row.shift_id }, now);
     return { ok: true, already: false, mailed: 1, shiftId: row.shift_id };
-  }).immediate();
-}
-
-export type AttendanceMark = 'attended' | 'no-show' | 'clear';
-
-export type AttendanceResult =
-  | { ok: true; shiftId: number; already: boolean }
-  | { ok: false; error: string };
-
-/** Records whether a confirmed person came. It does not change the spot or send email. */
-export function setAttendance(
-  db: Database.Database,
-  coordinatorId: number,
-  signupId: number,
-  mark: AttendanceMark,
-  now: string,
-): AttendanceResult {
-  return db.transaction((): AttendanceResult => {
-    const row = db
-      .prepare(
-        `SELECT id AS id, shift_id AS shift_id, status AS status, attended AS attended, anonymized_at AS anonymized_at
-         FROM signups WHERE id = ?`,
-      )
-      .get(signupId) as
-      | { id: number; shift_id: number; status: string; attended: number | null; anonymized_at: string | null }
-      | undefined;
-    if (!row || row.anonymized_at) return { ok: false, error: 'That signup is not available.' };
-    if (row.status !== 'confirmed') return { ok: false, error: 'That signup is cancelled.' };
-    const next = mark === 'attended' ? 1 : mark === 'no-show' ? 0 : null;
-    const current = row.attended === null ? null : Number(row.attended);
-    if (current === next) return { ok: true, shiftId: row.shift_id, already: true };
-    const updated = db
-      .prepare(
-        `UPDATE signups
-         SET attended = ?, updated_at = ?
-         WHERE id = ? AND status = 'confirmed' AND anonymized_at IS NULL`,
-      )
-      .run(next, now, signupId);
-    if (updated.changes !== 1) return { ok: false, error: 'That signup is not available.' };
-    if (next === null) writeAudit(db, coordinatorId, 'signup.attend.clear', { signupId: row.id, shiftId: row.shift_id }, now);
-    else writeAudit(db, coordinatorId, 'signup.attend', { signupId: row.id, shiftId: row.shift_id, attended: next }, now);
-    return { ok: true, shiftId: row.shift_id, already: false };
   }).immediate();
 }
 

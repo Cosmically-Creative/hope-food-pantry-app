@@ -18,7 +18,6 @@ const COLUMNS = [
   'Group size',
   'Notes',
   'Status',
-  'Attended',
 ] as const;
 
 export type RosterExport = { csv: string; rows: number };
@@ -34,13 +33,12 @@ type RosterRecord = {
   group_size: number;
   notes: string | null;
   status: string;
-  attended: number | null;
   anonymized_at: string | null;
 };
 
 const ROSTER_SQL = `SELECT s.starts_at_utc AS starts_at_utc, s.ends_at_utc AS ends_at_utc, e.tz AS tz, s.role AS role,
             su.name AS name, su.email AS email, su.phone AS phone, su.group_size AS group_size,
-            su.notes AS notes, su.status AS status, su.attended AS attended, su.anonymized_at AS anonymized_at
+            su.notes AS notes, su.status AS status, su.anonymized_at AS anonymized_at
      FROM signups su
      JOIN shifts s ON s.id = su.shift_id
      JOIN events e ON e.id = s.event_id`;
@@ -131,7 +129,6 @@ function present(row: RosterRecord): string[] {
     String(row.group_size),
     row.notes ?? '',
     row.status === 'cancelled' ? 'Cancelled' : 'Confirmed',
-    row.attended === 1 ? 'Attended' : row.attended === 0 ? 'No-show' : '',
   ];
 }
 

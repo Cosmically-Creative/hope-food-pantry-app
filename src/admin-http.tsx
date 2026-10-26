@@ -40,11 +40,9 @@ import {
   listMoveTargets,
   listOpenShiftsForPerson,
   moveSignup,
-  setAttendance,
   updateEvent,
   updateShift,
   updateTemplate,
-  type AttendanceMark,
 } from './admin/store.js';
 import {
   AdminHome,
@@ -191,7 +189,6 @@ export function registerAdmin(app: Hono, services: AdminServices): void {
   app.post(appPath(config, '/admin/signups/:id/remove'), (c) => submitRemoveSignup(c, services));
   app.get(appPath(config, '/admin/signups/:id/cancel'), (c) => showCancelSignup(c, services));
   app.post(appPath(config, '/admin/signups/:id/cancel'), (c) => submitCancelSignup(c, services));
-  app.post(appPath(config, '/admin/signups/:id/attendance'), (c) => submitAttendance(c, services));
   app.post(appPath(config, '/admin/signups/:id/move'), (c) => submitMove(c, services));
 }
 
@@ -1391,31 +1388,6 @@ async function submitCancelShift(c: Context, services: AdminServices): Promise<R
   }
 }
 
-async function submitAttendance(c: Context, services: AdminServices): Promise<Response> {
-  const session = await postedSession(c, services);
-  if (session instanceof Response) return session;
-  const mark = textField(session.body, 'mark');
-  if (!isAttendanceMark(mark)) {
-    return html(c, services, 'Coordinator · Hope Volunteer', <MessagePage heading="Coordinator" message="Choose attended or no-show." />, {
-      status: 400,
-      account: session,
-    });
-  }
-  try {
-    const result = setAttendance(services.db, session.coordinatorId, idFrom(c), mark, services.now());
-    if (!result.ok) {
-      return html(c, services, 'Coordinator · Hope Volunteer', <MessagePage heading="Coordinator" message={result.error} />, {
-        status: 400,
-        account: session,
-      });
-    }
-    const notice = mark === 'attended' ? 'attended' : mark === 'no-show' ? 'no-show' : 'attendance-cleared';
-    return c.redirect(appPath(services.config, `/admin/shifts/${result.shiftId}?notice=${notice}`), 303);
-  } catch (err) {
-    return saveFailed(c, services, session, err);
-  }
-}
-
 async function submitMove(c: Context, services: AdminServices): Promise<Response> {
   const session = await postedSession(c, services);
   if (session instanceof Response) return session;
@@ -1595,9 +1567,6 @@ function knownNotice(value: string | undefined): string | undefined {
     value === 'shift-cancelled' ||
     value === 'shift-closed' ||
     value === 'walk-in' ||
-    value === 'attended' ||
-    value === 'no-show' ||
-    value === 'attendance-cleared' ||
     value === 'moved' ||
     value === 'generated' ||
     value === 'no-template' ||
@@ -1644,10 +1613,6 @@ function blankWalkIn(
     message,
     contactId,
   };
-}
-
-function isAttendanceMark(value: string): value is AttendanceMark {
-  return value === 'attended' || value === 'no-show' || value === 'clear';
 }
 
 function signupValuesFrom(body: Record<string, unknown>): SignupValues {

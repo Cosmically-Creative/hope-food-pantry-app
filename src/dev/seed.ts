@@ -144,8 +144,8 @@ function insertFakeSignups(db: Database.Database, shiftId: number, createdAt: st
     `INSERT INTO signups (
        shift_id, name, email, email_norm, phone, is_minor, guardian_name, guardian_email,
        group_size, notes, status, manage_token_hash, token_expires_at, reminders_off,
-       attended, created_at, updated_at, anonymized_at
-     ) VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, 1, ?, ?, NULL, NULL, 0, NULL, ?, ?, NULL)`,
+       created_at, updated_at, anonymized_at
+     ) VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, 1, ?, ?, NULL, NULL, 0, ?, ?, NULL)`,
   );
   return people.map((person) =>
     insertId(

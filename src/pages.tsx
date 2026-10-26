@@ -614,15 +614,7 @@ function ShiftPane(props: { config: AppConfig; shift: PublicShift }) {
         {shift.inProgress ? <p class="status">In progress</p> : null}
         <Spots shift={shift} />
         <h4 class="roster-label">Volunteers</h4>
-        {shift.volunteers.length === 0 ? (
-          <p class="roster-empty">No one signed up yet.</p>
-        ) : (
-          <ul class="roster-names">
-            {shift.volunteers.map((name, index) => (
-              <li key={`${shift.id}-${index}`}>{name}</li>
-            ))}
-          </ul>
-        )}
+        <RosterNames config={props.config} shiftId={shift.id} names={shift.volunteers} />
       </div>
       {shift.full ? (
         <p class="btn-card is-static">
@@ -828,6 +820,22 @@ function CalendarShift(props: { config: AppConfig; shift: PublicShift }) {
         <span class="cal-action">{action}</span>
       </div>
     </a>
+  );
+}
+
+function RosterNames(props: { config: AppConfig; shiftId: number; names: string[] }) {
+  if (props.names.length === 0) {
+    return <p class="roster-empty">No one signed up yet.</p>;
+  }
+  return (
+    <ul class="roster-names">
+      {props.names.map((name, index) => (
+        <li key={`${props.shiftId}-${index}`}>
+          <img class="roster-mark" src={asset(props.config, '/img/sunburst.png')} alt="" />
+          <span>{name}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

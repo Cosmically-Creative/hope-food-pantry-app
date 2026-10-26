@@ -974,7 +974,6 @@ export function ShiftRoster(props: {
           ) : null}
         </div>
         <p class="panel-note">Cancelling a signup emails them. Their old private link stops working, and the email includes a new one.</p>
-        <p class="panel-note">Attendance stays on this roster. It does not send email, and it does not change how many spots are open.</p>
         <p class="panel-note">Moving a confirmed signup opens this spot and queues a change email. Their old private link stops working.</p>
         {props.moves && props.moves.targets.length === 0 ? <p class="panel-note">No other open shift in this event has room.</p> : null}
         {props.shift.people.length === 0 ? (
@@ -1782,21 +1781,6 @@ function Roster(props: { config: AppConfig; csrf: string; people: RosterPerson[]
           ) : null}
           {person.status === 'confirmed' ? (
             <>
-              <p>{attendanceLabel(person.attendance)}</p>
-              <form method="post" action={appPath(props.config, `/admin/signups/${person.id}/attendance`)} class="attendance-actions">
-                <input type="hidden" name="csrf" value={props.csrf} />
-                <button type="submit" name="mark" value="attended" aria-pressed={person.attendance === 'attended' ? 'true' : 'false'}>
-                  Attended
-                </button>
-                <button type="submit" name="mark" value="no-show" aria-pressed={person.attendance === 'no-show' ? 'true' : 'false'}>
-                  No-show
-                </button>
-                {person.attendance ? (
-                  <button type="submit" name="mark" value="clear">
-                    Clear
-                  </button>
-                ) : null}
-              </form>
               <p>
                 <ConfirmAnchor
                   class="text-action"
@@ -1912,12 +1896,6 @@ function MassRemove(props: { pick: 'shift' | 'signup'; action: string; title: st
   );
 }
 
-function attendanceLabel(attendance: RosterPerson['attendance']): string {
-  if (attendance === 'attended') return 'Attended.';
-  if (attendance === 'no-show') return 'No-show.';
-  return 'Attendance is not marked.';
-}
-
 function spotClass(shift: Pick<AdminShiftSummary, 'capacity' | 'occupied' | 'cancelled'>): string {
   if (shift.cancelled) return 'event-pill is-hidden';
   return shift.occupied >= shift.capacity ? 'event-pill is-full' : 'event-pill is-open';
@@ -1935,9 +1913,6 @@ const NOTICES: Record<string, string> = {
   'shift-cancelled': 'The shift is cancelled. Cancellation emails are queued.',
   'shift-closed': 'The shift is cancelled. No one needed an email.',
   'walk-in': 'They are on this shift. A confirmation email is queued.',
-  attended: 'Marked attended.',
-  'no-show': 'Marked as a no-show.',
-  'attendance-cleared': 'The attendance mark is cleared.',
   moved: 'They are on this shift. A change email is queued.',
   generated: 'Weekly shifts for the next three months are on the schedule. Existing shifts were left as they are.',
   'no-template': 'There is no active weekly template.',

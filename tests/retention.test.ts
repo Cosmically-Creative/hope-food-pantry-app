@@ -27,8 +27,8 @@ describe('retention cleanup', () => {
     const eventId = insertEvent(db, 'pantry', 'America/Chicago');
     const oldShift = insertShift(db, eventId, '2024-06-01T16:00:00.000Z', '2024-06-01T17:00:00.000Z');
     const recentShift = insertShift(db, eventId, '2026-06-14T16:00:00.000Z', '2026-06-14T17:00:00.000Z');
-    insertSignup(db, oldShift, 'Old Volunteer', 'old.volunteer@example.invalid', 1, 1);
-    insertSignup(db, recentShift, 'New Volunteer', 'new.volunteer@example.invalid', 0, null);
+    insertSignup(db, oldShift, 'Old Volunteer', 'old.volunteer@example.invalid', 1);
+    insertSignup(db, recentShift, 'New Volunteer', 'new.volunteer@example.invalid', 0);
 
     const result = runRetention(db, NOW);
     expect(result.signups).toBe(1);
@@ -44,14 +44,12 @@ describe('retention cleanup', () => {
       notes: null,
       manage_token_hash: null,
       status: 'confirmed',
-      attended: 1,
       anonymized_at: NOW,
     });
     expect(signup(db, recentShift).name).toBe('New Volunteer');
     const csv = exportShiftRoster(db, oldShift)?.csv ?? '';
     expect(csv).not.toContain('old.volunteer@example.invalid');
     expect(csv).not.toContain(',No,');
-    expect(csv).toContain('Attended');
     expect(JSON.stringify(db.prepare('SELECT detail_json AS detail_json FROM audit').all())).not.toContain('@');
   });
 
@@ -61,8 +59,8 @@ describe('retention cleanup', () => {
     const eventId = insertEvent(db, 'pantry', 'America/Chicago');
     const dueShift = insertShift(db, eventId, '2026-04-01T16:00:00.000Z', '2026-04-01T17:00:00.000Z');
     const earlyShift = insertShift(db, eventId, '2026-06-01T16:00:00.000Z', '2026-06-01T17:00:00.000Z');
-    const dueSignup = insertSignup(db, dueShift, 'Due Volunteer', 'due.volunteer@example.invalid', 0, null);
-    insertSignup(db, earlyShift, 'Early Volunteer', 'early.volunteer@example.invalid', 0, null);
+    const dueSignup = insertSignup(db, dueShift, 'Due Volunteer', 'due.volunteer@example.invalid', 0);
+    insertSignup(db, earlyShift, 'Early Volunteer', 'early.volunteer@example.invalid', 0);
     insertOutbox(db, {
       dedupe: 'confirmation:v1:due:due.volunteer@example.invalid',
       signupId: dueSignup,
@@ -87,7 +85,7 @@ describe('retention cleanup', () => {
     const db = await openDb();
     const eventId = insertEvent(db, 'pantry', 'America/Chicago');
     const shiftId = insertShift(db, eventId, '2026-06-14T16:00:00.000Z', '2026-06-14T17:00:00.000Z');
-    const signupId = insertSignup(db, shiftId, 'Mail Volunteer', 'mail.volunteer@example.invalid', 0, null);
+    const signupId = insertSignup(db, shiftId, 'Mail Volunteer', 'mail.volunteer@example.invalid', 0);
     insertOutbox(db, {
       dedupe: 'confirmation:v1:1:mail.volunteer@example.invalid',
       signupId,
@@ -210,10 +208,10 @@ describe('retention cleanup', () => {
     const db = await openDb();
     const eventId = insertEvent(db, 'pantry', 'America/Chicago');
     const shiftId = insertShift(db, eventId, '2024-06-01T16:00:00.000Z', '2024-06-01T17:00:00.000Z');
-    insertSignup(db, shiftId, 'Clock Volunteer', 'clock.volunteer@example.invalid', 0, null);
+    insertSignup(db, shiftId, 'Clock Volunteer', 'clock.volunteer@example.invalid', 0);
     const broken = insertEvent(db, 'broken', 'Not/AZone');
     const brokenShift = insertShift(db, broken, '2024-06-01T16:00:00.000Z', '2024-06-01T17:00:00.000Z');
-    insertSignup(db, brokenShift, 'Broken Volunteer', 'broken.volunteer@example.invalid', 0, null);
+    insertSignup(db, brokenShift, 'Broken Volunteer', 'broken.volunteer@example.invalid', 0);
 
     expect(runDueRetention(db, BEFORE)).toMatchObject({ ran: false });
     expect(signup(db, shiftId).name).toBe('Clock Volunteer');
@@ -239,7 +237,7 @@ describe('retention cleanup', () => {
     const fall = await openDb();
     const fallEvent = insertEvent(fall, 'pantry', 'America/Chicago');
     const fallShift = insertShift(fall, fallEvent, '2024-06-01T16:00:00.000Z', '2024-06-01T17:00:00.000Z');
-    insertSignup(fall, fallShift, 'Fall Volunteer', 'fall.volunteer@example.invalid', 0, null);
+    insertSignup(fall, fallShift, 'Fall Volunteer', 'fall.volunteer@example.invalid', 0);
     const firstHour = localUtc('2026-11-01', 1, 0, 'earlier');
     const secondHour = localUtc('2026-11-01', 1, 30, 'later');
     expect(runDueRetention(fall, firstHour).ran).toBe(true);
@@ -251,7 +249,7 @@ describe('retention cleanup', () => {
     const db = await openDb();
     const eventId = insertEvent(db, 'pantry', 'America/Chicago');
     const shiftId = insertShift(db, eventId, '2024-06-01T16:00:00.000Z', '2024-06-01T17:00:00.000Z');
-    insertSignup(db, shiftId, 'Runner Volunteer', 'runner.volunteer@example.invalid', 0, null);
+    insertSignup(db, shiftId, 'Runner Volunteer', 'runner.volunteer@example.invalid', 0);
     const runner = startRetentionRunner(db, () => NOW);
     expect(signup(db, shiftId).name).toBeNull();
     runner.stop();
@@ -304,15 +302,14 @@ function insertSignup(
   name: string,
   email: string,
   isMinor: number,
-  attended: number | null,
 ): number {
   return Number(
     db.prepare(
       `INSERT INTO signups (
          shift_id, name, email, email_norm, phone, is_minor, guardian_name, guardian_email,
          group_size, notes, status, manage_token_hash, token_expires_at, reminders_off,
-         attended, created_at, updated_at, anonymized_at
-       ) VALUES (?, ?, ?, ?, '555-0100', ?, ?, ?, 1, 'Bring a pen', 'confirmed', ?, ?, 0, ?, ?, ?, NULL)`,
+         created_at, updated_at, anonymized_at
+       ) VALUES (?, ?, ?, ?, '555-0100', ?, ?, ?, 1, 'Bring a pen', 'confirmed', ?, ?, 0, ?, ?, NULL)`,
     ).run(
       shiftId,
       name,
@@ -323,7 +320,6 @@ function insertSignup(
       isMinor ? 'guardian.pat@example.invalid' : null,
       `hash-${email}`,
       '2026-06-20T15:00:00.000Z',
-      attended,
       NOW,
       NOW,
     ).lastInsertRowid,
@@ -374,7 +370,6 @@ function signup(db: Awaited<ReturnType<typeof openDb>>, shiftId: number) {
     notes: string | null;
     manage_token_hash: string | null;
     status: string;
-    attended: number | null;
     anonymized_at: string | null;
   };
 }

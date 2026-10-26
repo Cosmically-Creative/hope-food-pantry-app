@@ -455,69 +455,6 @@ describe('coordinator screens', () => {
     expect(count(db, "SELECT COUNT(*) AS n FROM signups WHERE email_norm = 'late@example.invalid'")).toBe(0);
   });
 
-  it('marks attendance without emailing or showing it publicly', async () => {
-    const { app, db } = await buildApp();
-    const cookie = await signIn(app, db);
-    const shiftId = await openShift(app, cookie, { published: true, capacity: '2', role: 'Greeting', date: '2026-10-22' });
-    const added = await postWalkIn(app, cookie, shiftId, { name: 'Ria Example', email: 'ria.fake@example.invalid' });
-    expect(added.status).toBe(303);
-    const signupId = (db.prepare("SELECT id AS id FROM signups WHERE email_norm = 'ria.fake@example.invalid'").get() as { id: number }).id;
-    const mailBefore = count(db, 'SELECT COUNT(*) AS n FROM outbox');
-    const attended = await postForm(app, `/admin/signups/${signupId}/attendance`, cookie, { mark: 'attended' });
-    expect(attended.status).toBe(303);
-    expect(attended.headers.get('location')).toContain('notice=attended');
-    expect(db.prepare('SELECT attended AS attended FROM signups WHERE id = ?').get(signupId)).toEqual({ attended: 1 });
-    expect(count(db, 'SELECT COUNT(*) AS n FROM outbox')).toBe(mailBefore);
-    expect(count(db, "SELECT COUNT(*) AS n FROM audit WHERE action = 'signup.attend'")).toBe(1);
-    const repeat = await postForm(app, `/admin/signups/${signupId}/attendance`, cookie, { mark: 'attended' });
-    expect(repeat.status).toBe(303);
-    expect(count(db, "SELECT COUNT(*) AS n FROM audit WHERE action = 'signup.attend'")).toBe(1);
-    const roster = await (await app.request(attended.headers.get('location') ?? '', { headers: { cookie } })).text();
-    expect(roster).toContain('Marked attended.');
-    expect(roster).toContain('Attended.');
-    expect(roster).toContain('aria-pressed="true"');
-
-    const missed = await postForm(app, `/admin/signups/${signupId}/attendance`, cookie, { mark: 'no-show' });
-    expect(missed.status).toBe(303);
-    expect(db.prepare('SELECT attended AS attended FROM signups WHERE id = ?').get(signupId)).toEqual({ attended: 0 });
-    const missedPage = await (await app.request(missed.headers.get('location') ?? '', { headers: { cookie } })).text();
-    expect(missedPage).toContain('No-show.');
-    const cleared = await postForm(app, `/admin/signups/${signupId}/attendance`, cookie, { mark: 'clear' });
-    expect(cleared.status).toBe(303);
-    expect(db.prepare('SELECT attended AS attended FROM signups WHERE id = ?').get(signupId)).toEqual({ attended: null });
-    expect(count(db, "SELECT COUNT(*) AS n FROM audit WHERE action = 'signup.attend.clear'")).toBe(1);
-
-    const marked = await postForm(app, `/admin/signups/${signupId}/attendance`, cookie, { mark: 'attended' });
-    expect(marked.status).toBe(303);
-    const publicShift = await (await app.request(`/s/${shiftId}`)).text();
-    expect(publicShift).not.toContain('ria.fake@example.invalid');
-    expect(publicShift).not.toContain('No-show');
-    expect(publicShift).not.toContain('Attended.');
-    expect(await (await app.request('/')).text()).not.toContain('ria.fake@example.invalid');
-
-    db.prepare("UPDATE shifts SET starts_at_utc = '2026-10-14T14:00:00.000Z', ends_at_utc = '2026-10-14T17:00:00.000Z' WHERE id = ?").run(shiftId);
-    const afterEnd = await postForm(app, `/admin/signups/${signupId}/attendance`, cookie, { mark: 'no-show' });
-    expect(afterEnd.status).toBe(303);
-    expect(db.prepare('SELECT attended AS attended FROM signups WHERE id = ?').get(signupId)).toEqual({ attended: 0 });
-
-    await postForm(app, `/admin/signups/${signupId}/cancel`, cookie, {});
-    const blocked = await postForm(app, `/admin/signups/${signupId}/attendance`, cookie, { mark: 'attended' });
-    expect(blocked.status).toBe(400);
-    expect(await blocked.text()).toContain('That signup is cancelled.');
-    expect(db.prepare('SELECT attended AS attended FROM signups WHERE id = ?').get(signupId)).toEqual({ attended: 0 });
-    const closedRoster = await (await app.request(`/admin/shifts/${shiftId}`, { headers: { cookie } })).text();
-    expect(closedRoster).not.toContain(`/admin/signups/${signupId}/attendance`);
-    expect(auditJson(db)).not.toContain('@');
-
-    const bare = await app.request(`/admin/signups/${signupId}/attendance`, {
-      method: 'POST',
-      headers: { origin: ORIGIN, 'content-type': 'application/x-www-form-urlencoded', cookie },
-      body: new URLSearchParams({ mark: 'attended' }),
-    });
-    expect(bare.status).toBe(403);
-    expect(db.prepare('SELECT attended AS attended FROM signups WHERE id = ?').get(signupId)).toEqual({ attended: 0 });
-  });
-
   it('rejects a coordinator form without its matching token', async () => {
     const { app, db } = await buildApp();
     const cookie = await signIn(app, db);
@@ -551,7 +488,7 @@ describe('coordinator screens', () => {
     });
     expect(added.status).toBe(303);
     const signupId = signupIdFor(db, 'kim@example.invalid');
-    db.prepare('UPDATE signups SET phone = ?, notes = ?, reminders_off = 1, attended = 1 WHERE id = ?').run('712-555-0199', 'Blue shirt', signupId);
+    db.prepare('UPDATE signups SET phone = ?, notes = ?, reminders_off = 1 WHERE id = ?').run('712-555-0199', 'Blue shirt', signupId);
     const oldToken = manageToken(db, signupId, 'confirmation');
     db.prepare(
       `INSERT INTO outbox (
@@ -569,20 +506,18 @@ describe('coordinator screens', () => {
     expect(moved.status).toBe(303);
     expect(moved.headers.get('location')).toBe(`/admin/shifts/${destinationId}?notice=moved`);
 
-    const source = db.prepare('SELECT status, attended, shift_id FROM signups WHERE id = ?').get(signupId) as {
+    const source = db.prepare('SELECT status, shift_id FROM signups WHERE id = ?').get(signupId) as {
       status: string;
-      attended: number;
       shift_id: number;
     };
-    expect(source).toEqual({ status: 'cancelled', attended: 1, shift_id: sourceId });
+    expect(source).toEqual({ status: 'cancelled', shift_id: sourceId });
     expect(readManageSignup(db, oldToken, NOW)).toBeNull();
     const created = db.prepare(
-      `SELECT id, status, attended, phone, notes, reminders_off, is_minor, guardian_name, guardian_email, shift_id
+      `SELECT id, status, phone, notes, reminders_off, is_minor, guardian_name, guardian_email, shift_id
        FROM signups WHERE shift_id = ? AND status = 'confirmed'`,
     ).get(destinationId) as {
       id: number;
       status: string;
-      attended: number | null;
       phone: string;
       notes: string;
       reminders_off: number;
@@ -593,7 +528,6 @@ describe('coordinator screens', () => {
     };
     expect(created).toMatchObject({
       status: 'confirmed',
-      attended: null,
       phone: '712-555-0199',
       notes: 'Blue shirt',
       reminders_off: 1,
@@ -625,7 +559,7 @@ describe('coordinator screens', () => {
     const roster = await (await app.request(moved.headers.get('location') ?? '', { headers: { cookie } })).text();
     expect(roster).toContain('They are on this shift. A change email is queued.');
     expect(roster).toContain('Kim Example');
-    expect(roster).toContain('Attendance is not marked.');
+    expect(roster).not.toContain('No-show');
     const sourceRoster = await (await app.request(`/admin/shifts/${sourceId}`, { headers: { cookie } })).text();
     expect(sourceRoster).not.toContain(`/admin/signups/${signupId}/move`);
     expect(sourceRoster).toContain('0/2 spots filled');
@@ -636,7 +570,6 @@ describe('coordinator screens', () => {
     expect(home).not.toContain('Blue shirt');
     expect(home).toContain('Kim Example');
     expect(shiftPage).not.toContain('kim@example.invalid');
-    expect(shiftPage).not.toContain('Attended.');
     expect(auditJson(db)).not.toContain('@');
   });
 

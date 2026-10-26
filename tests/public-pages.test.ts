@@ -36,6 +36,7 @@ describe('public pages', () => {
     expect(html).toContain('Wednesday Sorting');
     expect(html).toContain('Wednesday Greeting');
     expect(html).toContain('Lane Wednesday');
+    expect(html).toContain('class="roster-mark" src="/img/sunburst.png?v=');
     expect(html).toContain('Live Greeting');
     expect(html).toContain('0/2 spots filled');
     expect(html).toContain('1/4 spots filled');

@@ -120,7 +120,6 @@ main:focus-visible {
 a.btn,
 button,
 .inline-form button,
-.attendance-actions button,
 .move-form button,
 .signup-form button,
 .cancel-form button {
@@ -679,7 +678,20 @@ main a:hover {
 }
 
 .roster-names li {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
   padding: 0.12rem 0;
+}
+
+.roster-names li span {
+  min-width: 0;
+}
+
+.roster-mark {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: none;
 }
 
 .roster-empty {
@@ -1298,8 +1310,7 @@ article.shift-card {
 .signup-form button,
 .cancel-form button,
 .move-form button,
-.inline-form button,
-.attendance-actions button {
+.inline-form button {
   width: fit-content;
 }
 
@@ -1373,18 +1384,6 @@ article.shift-card {
 
 .move-form select {
   background: var(--hope-blue-50);
-}
-
-.attendance-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-}
-
-.attendance-actions button[aria-pressed="true"] {
-  outline: 3px solid var(--hope-ink);
-  outline-offset: 2px;
 }
 
 .inline-form {

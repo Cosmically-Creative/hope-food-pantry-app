@@ -398,7 +398,7 @@ function insertAnonymized(db: Database.Database, shiftId: number): void {
   db.prepare(
     `INSERT INTO signups (
        shift_id, name, email, email_norm, phone, is_minor, guardian_name, guardian_email, group_size,
-       notes, status, manage_token_hash, token_expires_at, reminders_off, attended, created_at, updated_at, anonymized_at
-     ) VALUES (?, NULL, NULL, NULL, NULL, 0, NULL, NULL, 1, NULL, 'confirmed', NULL, NULL, 0, NULL, ?, ?, ?)`,
+       notes, status, manage_token_hash, token_expires_at, reminders_off, created_at, updated_at, anonymized_at
+     ) VALUES (?, NULL, NULL, NULL, NULL, 0, NULL, NULL, 1, NULL, 'confirmed', NULL, NULL, 0, ?, ?, ?)`,
   ).run(shiftId, INSTANT, INSTANT, INSTANT);
 }
