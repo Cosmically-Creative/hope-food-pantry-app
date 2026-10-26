@@ -2293,13 +2293,40 @@ button.btn-quiet::before {
   margin: 0.35rem 0 0;
 }
 
+.admin-list {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
+.admin-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1.2fr) minmax(12rem, 1.6fr) auto;
+  gap: 0.35rem 1rem;
+  align-items: baseline;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--hope-border-2);
+}
+
+.admin-row p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-you {
+  margin-left: 0.45rem;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
 #add-shift {
   border-radius: 1.25rem;
   padding-right: 2.5rem;
 }
 
 @media (max-width: 42em) {
-  .contact-row {
+  .contact-row,
+  .admin-row {
     grid-template-columns: 1fr;
   }
 }

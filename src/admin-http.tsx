@@ -60,15 +60,18 @@ import {
   templateEndPrompt,
   templateRemovalPrompt,
   type ConfirmPrompt,
+  adminRemovalPrompt,
   contactRemovalPrompt,
   ContactPage,
   ContactsPage,
+  AdminsPage,
   SettingsPage,
   ShiftEditor,
   ShiftRoster,
   TemplateEditor,
   type WalkInState,
 } from './admin-pages.js';
+import { addAdmin, deactivateAdmin, listAdmins, readAdminRemoval, type AdminErrors, type AdminForm } from './admins.js';
 import { writeAudit } from './auth/audit.js';
 import { consumeLoginLink, issueLoginProof, loginLinkOpen, loginProofMatches, requestMagicLink } from './auth/login.js';
 import { csrfMatches, readSession, revokeSession, sessionClearCookie, sessionSetCookie, type CoordinatorSession } from './auth/session.js';
@@ -141,6 +144,10 @@ export function registerAdmin(app: Hono, services: AdminServices): void {
   app.get(appPath(config, '/admin'), (c) => showHome(c, services));
   app.get(appPath(config, '/admin/settings'), (c) => showSettings(c, services));
   app.post(appPath(config, '/admin/settings'), (c) => submitSettings(c, services));
+  app.get(appPath(config, '/admin/admins'), (c) => showAdmins(c, services));
+  app.post(appPath(config, '/admin/admins'), (c) => submitNewAdmin(c, services));
+  app.get(appPath(config, '/admin/admins/:id/remove'), (c) => showRemoveAdmin(c, services));
+  app.post(appPath(config, '/admin/admins/:id/remove'), (c) => submitRemoveAdmin(c, services));
   app.post(appPath(config, '/admin/export'), (c) => submitExportRange(c, services));
   app.get(appPath(config, '/admin/contacts'), (c) => showContacts(c, services));
   app.post(appPath(config, '/admin/contacts/new'), (c) => submitNewContact(c, services));
@@ -629,6 +636,87 @@ async function submitSettings(c: Context, services: AdminServices): Promise<Resp
     return saveFailed(c, services, session, err);
   }
   return c.redirect(appPath(services.config, '/admin/settings?notice=settings-saved'), 303);
+}
+
+function showAdmins(
+  c: Context,
+  services: AdminServices,
+  state?: { values?: AdminForm; errors?: AdminErrors; status?: 200 | 400 | 403; confirm?: ConfirmPrompt },
+) {
+  const session = requireSession(c, services);
+  if (session instanceof Response) return session;
+  return html(
+    c,
+    services,
+    'Administrators · Hope Volunteer',
+    <AdminsPage
+      config={services.config}
+      csrf={session.csrf}
+      currentId={session.coordinatorId}
+      admins={listAdmins(services.db)}
+      notice={state?.status === 400 ? undefined : knownNotice(c.req.query('notice'))}
+      form={state?.values ? { values: state.values, errors: state.errors ?? {} } : undefined}
+      confirm={state?.confirm}
+    />,
+    { account: session, status: state?.status ?? 200 },
+  );
+}
+
+async function submitNewAdmin(c: Context, services: AdminServices): Promise<Response> {
+  const session = await postedSession(c, services);
+  if (session instanceof Response) return session;
+  const values = { name: textField(session.body, 'name'), email: textField(session.body, 'email') };
+  try {
+    const saved = addAdmin(services.db, session.coordinatorId, values, services.now());
+    if (!saved.ok) return showAdmins(c, services, { values, errors: saved.errors, status: 400 });
+    const notice = saved.status === 'restored' ? 'admin-restored' : 'admin-added';
+    return c.redirect(appPath(services.config, `/admin/admins?notice=${notice}`), 303);
+  } catch (err) {
+    return saveFailed(c, services, session, err);
+  }
+}
+
+function showRemoveAdmin(c: Context, services: AdminServices, error?: string, status: 200 | 400 | 403 = 200) {
+  const session = requireSession(c, services);
+  if (session instanceof Response) return session;
+  const removal = readAdminRemoval(services.db, idFrom(c));
+  if (!removal) return missing(c, services);
+  const prompt = adminRemovalPrompt({
+    name: removal.admin.name,
+    email: removal.admin.email,
+    self: removal.admin.id === session.coordinatorId,
+    last: removal.last,
+  });
+  return showAdmins(c, services, {
+    status,
+    confirm: {
+      ...prompt,
+      body: error && error !== prompt.body ? error : prompt.body,
+      submit: error ? undefined : prompt.submit,
+      error: error && error !== prompt.body ? error : undefined,
+      action: appPath(services.config, `/admin/admins/${removal.admin.id}/remove`),
+    },
+  });
+}
+
+async function submitRemoveAdmin(c: Context, services: AdminServices): Promise<Response> {
+  const session = await postedSession(c, services);
+  if (session instanceof Response) return session;
+  const id = idFrom(c);
+  try {
+    const removed = deactivateAdmin(services.db, session.coordinatorId, id, services.now());
+    if (!removed.ok) {
+      if (removed.reason === 'missing') return missing(c, services);
+      return showRemoveAdmin(c, services, 'Add another administrator before removing this one.', 400);
+    }
+    if (id === session.coordinatorId) {
+      c.header('Set-Cookie', sessionClearCookie(services.config));
+      return c.redirect(appPath(services.config, '/login'), 303);
+    }
+    return c.redirect(appPath(services.config, '/admin/admins?notice=admin-removed'), 303);
+  } catch (err) {
+    return saveFailed(c, services, session, err);
+  }
 }
 
 function settingsFormFromBody(body: Record<string, unknown>): SettingsForm {
@@ -1520,6 +1608,9 @@ function knownNotice(value: string | undefined): string | undefined {
     value === 'template-removed' ||
     value === 'event-removed' ||
     value === 'settings-saved' ||
+    value === 'admin-added' ||
+    value === 'admin-restored' ||
+    value === 'admin-removed' ||
     value === 'contact-removed' ||
     value === 'contact-saved' ||
     value === 'contact-updated' ||

@@ -16,6 +16,7 @@ import {
 import type { SignupErrors, SignupValues } from './signup-form.js';
 import { addLocalDays, formatInstantInZone, todayInZone } from './time.js';
 import { ShiftTargetOptions } from './shift-options.js';
+import type { AdminAccount, AdminErrors, AdminForm } from './admins.js';
 import { assetHref } from './static-assets.js';
 import { appPath } from './url.js';
 
@@ -140,6 +141,27 @@ export function contactRemovalPrompt(contact: { name: string; email: string }): 
   };
 }
 
+export function adminRemovalPrompt(admin: { name: string; email: string; self: boolean; last: boolean }): Omit<ConfirmPrompt, 'action'> {
+  const title = admin.self ? 'Remove your access' : `Remove ${admin.name}`;
+  if (admin.last) {
+    return { title, detail: admin.email, body: 'Add another administrator before removing this one.' };
+  }
+  if (admin.self) {
+    return {
+      title,
+      detail: admin.email,
+      body: 'This signs you out. Your sign-in links stop working. Someone else who still has access can add you again. It does not send email.',
+      submit: 'Remove your access',
+    };
+  }
+  return {
+    title,
+    detail: admin.email,
+    body: 'This removes their access. Their sign-in links stop working. It does not send email.',
+    submit: 'Remove this administrator',
+  };
+}
+
 export function templateRemovalPrompt(
   template: { role: string; weekday: number; active: boolean },
   error?: string,
@@ -226,6 +248,7 @@ export function AdminHome(props: {
           <nav class="desk-links" aria-label="Coordinator">
             <a href={appPath(props.config, '/admin/contacts')}>Contacts</a>
             <a href={appPath(props.config, '/admin/settings')}>Settings</a>
+            <a href={appPath(props.config, '/admin/admins')}>Administrators</a>
           </nav>
         </div>
       </header>
@@ -352,6 +375,78 @@ export function SettingsPage(props: {
         </label>
         <button type="submit">Save settings</button>
       </form>
+    </>
+  );
+}
+
+export function AdminsPage(props: {
+  config: AppConfig;
+  csrf: string;
+  currentId: number;
+  admins: AdminAccount[];
+  notice?: string;
+  form?: { values: AdminForm; errors: AdminErrors };
+  confirm?: ConfirmPrompt;
+}) {
+  const form = props.form ?? { values: { name: '', email: '' }, errors: {} };
+  const only = props.admins.length === 1;
+  return (
+    <>
+      <Crumb items={[{ href: appPath(props.config, '/admin'), label: 'Coordinator' }, { label: 'Administrators' }]} />
+      <h1>Administrators</h1>
+      <Notice notice={props.notice} />
+      <p>
+        These people can sign in and manage the pantry. Adding someone does not send email. They request a sign-in link on the coordinator sign-in page. Removing someone signs them out and stops unused sign-in links. The last administrator stays until another one is added. Saving an address you removed earlier gives that person access again.
+      </p>
+      <form method="post" action={appPath(props.config, '/admin/admins')} class="signup-form">
+        <input type="hidden" name="csrf" value={props.csrf} />
+        <h2>Add an administrator</h2>
+        <WalkInField id="admin-name" label="Name" name="name" type="text" value={form.values.name} error={form.errors.name} required />
+        <WalkInField
+          id="admin-email"
+          label="Email"
+          name="email"
+          type="email"
+          value={form.values.email}
+          error={form.errors.email}
+          hint="This is the address they use to request a sign-in link."
+          required
+        />
+        <button type="submit">Add this administrator</button>
+      </form>
+      <section class="desk-events" aria-labelledby="admins-heading">
+        <h2 id="admins-heading">{props.admins.length === 1 ? '1 administrator' : `${props.admins.length} administrators`}</h2>
+        {only ? <p class="panel-note">This is the only administrator. Add another one before removing anyone.</p> : null}
+        {props.admins.length === 0 ? <p class="empty">No administrators yet.</p> : null}
+        {props.admins.length > 0 ? (
+          <ul class="admin-list">
+            {props.admins.map((person) => {
+              const self = person.id === props.currentId;
+              return (
+                <li class="admin-row" key={person.id}>
+                  <p>
+                    <strong>{person.name}</strong>
+                    {self ? <span class="admin-you">You</span> : null}
+                  </p>
+                  <p>{person.email}</p>
+                  {only ? null : (
+                    <p>
+                      <ConfirmAnchor
+                        href={appPath(props.config, `/admin/admins/${person.id}/remove`)}
+                        label={self ? 'Remove your access' : `Remove ${person.name}`}
+                        prompt={adminRemovalPrompt({ name: person.name, email: person.email, self, last: false })}
+                      >
+                        Remove
+                      </ConfirmAnchor>
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+      </section>
+      <ConfirmDialog config={props.config} csrf={props.csrf} prompt={props.confirm} />
     </>
   );
 }
@@ -1009,11 +1104,12 @@ function monthBounds(today: string, offset: number): { from: string; to: string 
   return { from: start.toString(), to: end.toString() };
 }
 
-function ConfirmAnchor(props: { href: string; class?: string; prompt: Omit<ConfirmPrompt, 'action'>; children: string }) {
+function ConfirmAnchor(props: { href: string; class?: string; label?: string; prompt: Omit<ConfirmPrompt, 'action'>; children: string }) {
   return (
     <a
       class={props.class}
       href={props.href}
+      aria-label={props.label}
       data-confirm=""
       data-confirm-action={props.href}
       data-confirm-title={props.prompt.title}
@@ -1805,6 +1901,9 @@ const NOTICES: Record<string, string> = {
   'template-removed': 'That weekly template is removed. Shifts already on the schedule stay, and they are no longer tied to the weekly pattern.',
   'event-removed': 'That event is removed.',
   'settings-saved': 'Settings saved.',
+  'admin-added': 'That person can sign in. Ask them to request a sign-in link. This did not send email.',
+  'admin-restored': 'That person can sign in again.',
+  'admin-removed': 'That person can no longer sign in.',
   'contact-removed': 'That person is removed from the contact list.',
   'contact-saved': 'That contact is saved.',
   'contact-updated': 'That contact is updated.',
