@@ -85,9 +85,6 @@ export type RosterPerson = {
   name: string;
   email: string;
   phone: string | null;
-  minor: boolean;
-  guardianName: string | null;
-  guardianEmail: string | null;
   notes: string | null;
   status: 'confirmed' | 'cancelled';
   attendance: 'attended' | 'no-show' | null;
@@ -294,7 +291,7 @@ export function getAdminShift(db: Database.Database, id: number): AdminShift | n
   if (!row) return null;
   const people = db
     .prepare(
-      `SELECT id, name, email, phone, is_minor, guardian_name, guardian_email, notes, status, attended
+      `SELECT id, name, email, phone, notes, status, attended
        FROM signups
        WHERE shift_id = ? AND anonymized_at IS NULL AND name IS NOT NULL AND email IS NOT NULL
        ORDER BY CASE status WHEN 'confirmed' THEN 0 ELSE 1 END, id`,
@@ -304,9 +301,6 @@ export function getAdminShift(db: Database.Database, id: number): AdminShift | n
     name: string;
     email: string;
     phone: string | null;
-    is_minor: number;
-    guardian_name: string | null;
-    guardian_email: string | null;
     notes: string | null;
     status: string;
     attended: number | null;
@@ -324,9 +318,6 @@ export function getAdminShift(db: Database.Database, id: number): AdminShift | n
         name: person.name,
         email: person.email,
         phone: person.phone,
-        minor: person.is_minor === 1,
-        guardianName: person.guardian_name,
-        guardianEmail: person.guardian_email,
         notes: person.notes,
         status: person.status,
         attendance: person.attended === 1 ? 'attended' : person.attended === 0 ? 'no-show' : null,
@@ -1277,7 +1268,7 @@ function relocate(
   const newSignupId = Number(inserted.lastInsertRowid);
   const shift = mailShift(db, destination.id);
   if (!shift) throw new Error('The destination shift was not available after it was checked.');
-  queueChanged(
+    queueChanged(
     db,
     {
       signupId: newSignupId,
@@ -1286,7 +1277,6 @@ function relocate(
       token: issued.token,
       volunteerName: source.name,
       volunteerEmail: source.email_norm,
-      guardianEmail: source.is_minor === 1 ? source.guardian_email : null,
       shift: shift.facts,
       mail,
       now,
@@ -1419,7 +1409,7 @@ function bumpAndNotify(db: Database.Database, shiftId: number, now: string, mail
   if (!shift) return 0;
   const people = db
     .prepare(
-      `SELECT id, name, email_norm, guardian_email, shift_id, status
+      `SELECT id, name, email_norm, shift_id, status
        FROM signups
        WHERE shift_id = ? AND status = 'confirmed' AND anonymized_at IS NULL AND name IS NOT NULL AND email_norm IS NOT NULL`,
     )
@@ -1435,7 +1425,6 @@ function bumpAndNotify(db: Database.Database, shiftId: number, now: string, mail
       token,
       volunteerName: person.name,
       volunteerEmail: person.email_norm,
-      guardianEmail: person.guardian_email,
       shift: shift.facts,
       mail,
       now,
@@ -1448,7 +1437,7 @@ function bumpAndNotify(db: Database.Database, shiftId: number, now: string, mail
 function cancelConfirmedOnShift(db: Database.Database, shiftId: number, now: string, mail: MailIdentity): number {
   const people = db
     .prepare(
-      `SELECT id, name, email_norm, guardian_email, shift_id, status
+      `SELECT id, name, email_norm, shift_id, status
        FROM signups
        WHERE shift_id = ? AND status = 'confirmed' AND anonymized_at IS NULL AND name IS NOT NULL AND email_norm IS NOT NULL`,
     )
@@ -1481,7 +1470,6 @@ function cancelConfirmedPerson(db: Database.Database, person: PersonRow, now: st
     token: issued.token,
     volunteerName: person.name,
     volunteerEmail: person.email_norm,
-    guardianEmail: person.guardian_email,
     shift: shift.facts,
     mail,
     now,
@@ -1546,7 +1534,7 @@ function mailShift(db: Database.Database, shiftId: number): { version: number; e
 function loadPerson(db: Database.Database, signupId: number): PersonRow | null {
   const row = db
     .prepare(
-      `SELECT id, name, email_norm, guardian_email, shift_id, status
+      `SELECT id, name, email_norm, shift_id, status
        FROM signups
        WHERE id = ? AND anonymized_at IS NULL`,
     )
@@ -1692,7 +1680,6 @@ type PersonRow = {
   id: number;
   name: string | null;
   email_norm: string | null;
-  guardian_email: string | null;
   shift_id: number;
   status: string;
 };

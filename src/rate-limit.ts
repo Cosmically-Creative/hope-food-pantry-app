@@ -8,8 +8,6 @@ import { formatUtc } from './time.js';
 export const SIGNUP_IP_LIMIT = 5;
 export const SIGNUP_IP_WINDOW_MS = 10 * 60 * 1000;
 export const SIGNUP_EMAIL_LIMIT = 3;
-/** A guardian can have several children signed up, so this allowance is a little wider. */
-export const SIGNUP_GUARDIAN_LIMIT = 5;
 export const SWITCH_IP_LIMIT = 10;
 export const SWITCH_RECIPIENT_LIMIT = 5;
 export const MANAGE_TOKEN_LIMIT = 20;
@@ -30,8 +28,8 @@ export type RateDecision = { limited: false } | { limited: true; retryAfter: num
 
 /**
  * Counts validated public switch attempts, not the rotating signup id or token.
- * Both recipient roles share one daily allowance. Check and charge every bucket
- * atomically so a blocked recipient cannot consume another person's allowance.
+ * Check and charge every bucket atomically so a blocked recipient cannot consume
+ * another person's allowance.
  */
 export function recordSwitchAttempt(
   db: Database.Database,
@@ -140,25 +138,6 @@ export function recordSignupEmail(
     kind: 'signup-email',
     id: emailNorm,
     limit: SIGNUP_EMAIL_LIMIT,
-    window: dayWindow(now, timeZone),
-  });
-}
-
-/**
- * Counts signups that mail a guardian address. Without it, someone could rotate
- * volunteer addresses and keep sending mail to one guardian.
- */
-export function recordSignupGuardian(
-  db: Database.Database,
-  secret: string,
-  now: string,
-  timeZone: string,
-  guardianEmailNorm: string,
-): RateDecision {
-  return record(db, secret, now, {
-    kind: 'signup-guardian',
-    id: guardianEmailNorm,
-    limit: SIGNUP_GUARDIAN_LIMIT,
     window: dayWindow(now, timeZone),
   });
 }

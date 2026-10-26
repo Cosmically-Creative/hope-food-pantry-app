@@ -10,7 +10,6 @@ export type QueuedSignup = {
   token: string;
   volunteerName: string;
   volunteerEmail: string;
-  guardianEmail: string | null;
   shift: MailShift;
   mail: MailIdentity;
   now: string;
@@ -19,8 +18,7 @@ export type QueuedSignup = {
 
 /** Inserts one row per recipient. The same logical message does not get a second row. */
 export function queueConfirmation(db: Database.Database, input: QueuedSignup): void {
-  queue(db, 'confirmation', input, (audience) => renderConfirmation({
-    audience,
+  queue(db, 'confirmation', input, () => renderConfirmation({
     volunteerName: input.volunteerName,
     shift: input.shift,
     manageUrl: manageUrl(input),
@@ -29,8 +27,7 @@ export function queueConfirmation(db: Database.Database, input: QueuedSignup): v
 }
 
 export function queueCancellation(db: Database.Database, input: QueuedSignup): void {
-  queue(db, 'cancelled', input, (audience) => renderCancellation({
-    audience,
+  queue(db, 'cancelled', input, () => renderCancellation({
     volunteerName: input.volunteerName,
     shift: input.shift,
     manageUrl: manageUrl(input),
@@ -40,9 +37,8 @@ export function queueCancellation(db: Database.Database, input: QueuedSignup): v
 }
 
 export function queueChanged(db: Database.Database, input: QueuedSignup, reason: 'edit' | 'move' | 'switch' = 'edit'): void {
-  queue(db, 'changed', input, (audience) => {
+  queue(db, 'changed', input, () => {
     const letter = {
-      audience,
       volunteerName: input.volunteerName,
       shift: input.shift,
       manageUrl: manageUrl(input),
@@ -110,36 +106,28 @@ function queue(
   db: Database.Database,
   kind: 'confirmation' | 'cancelled' | 'changed',
   input: QueuedSignup,
-  render: (audience: 'volunteer' | 'guardian') => { subject: string; text: string; html: string },
+  render: () => { subject: string; text: string; html: string },
 ): void {
-  for (const recipient of recipients(input.volunteerEmail, input.guardianEmail)) {
-    const audience = recipient === input.volunteerEmail ? 'volunteer' : 'guardian';
-    const rendered = render(audience);
-    db.prepare(
-      `INSERT INTO outbox (
-         dedupe_key, signup_id, shift_id, kind, to_email, subject, body_text, body_html,
-         headers_json, send_after, attempts, status, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending', ?)
-       ON CONFLICT (dedupe_key) DO NOTHING`,
-    ).run(
-      `${kind}:v${input.shiftVersion}:${input.signupId}:${recipient}`,
-      input.signupId,
-      input.shiftId,
-      kind,
-      recipient,
-      rendered.subject,
-      rendered.text,
-      rendered.html,
-      JSON.stringify({ From: input.mail.from, 'Reply-To': input.mail.replyTo }),
-      input.now,
-      input.now,
-    );
-  }
-}
-
-function recipients(volunteerEmail: string, guardianEmail: string | null): string[] {
-  if (!guardianEmail || guardianEmail === volunteerEmail) return [volunteerEmail];
-  return [volunteerEmail, guardianEmail];
+  const rendered = render();
+  db.prepare(
+    `INSERT INTO outbox (
+       dedupe_key, signup_id, shift_id, kind, to_email, subject, body_text, body_html,
+       headers_json, send_after, attempts, status, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending', ?)
+     ON CONFLICT (dedupe_key) DO NOTHING`,
+  ).run(
+    `${kind}:v${input.shiftVersion}:${input.signupId}:${input.volunteerEmail}`,
+    input.signupId,
+    input.shiftId,
+    kind,
+    input.volunteerEmail,
+    rendered.subject,
+    rendered.text,
+    rendered.html,
+    JSON.stringify({ From: input.mail.from, 'Reply-To': input.mail.replyTo }),
+    input.now,
+    input.now,
+  );
 }
 
 function manageUrl(input: QueuedSignup): string {

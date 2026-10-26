@@ -384,9 +384,9 @@ describe('coordinator screens', () => {
     const html = await page.text();
     expect(html).toContain('Add a walk-in');
     expect(html).toContain('src="/js/enhance.js?v=');
-    expect(html).toContain('data-under-18');
-    expect(html).toContain('data-guardian');
-    expect(html).not.toMatch(/id="walkin-under-18"[^>]*\schecked/);
+    expect(html).not.toContain('data-under-18');
+    expect(html).not.toContain('data-guardian');
+    expect(html).not.toContain('They are under 18');
     expect(html).not.toContain('cf-turnstile');
     const body = walkInBody(html, {
       name: 'Dee Example',
@@ -420,26 +420,16 @@ describe('coordinator screens', () => {
     expect(count(db, "SELECT COUNT(*) AS n FROM signups WHERE email_norm = 'dee@example.invalid' AND status = 'confirmed'")).toBe(2);
   });
 
-  it('keeps a walk-in off a full, closed, or ended shift and asks for a guardian', async () => {
+  it('keeps a walk-in off a full, closed, or ended shift', async () => {
     const { app, db } = await buildApp();
     const cookie = await signIn(app, db);
     const shiftId = await openShift(app, cookie, { published: true, capacity: '1', role: 'Sorting', date: '2026-10-21' });
-    const minor = await postWalkIn(app, cookie, shiftId, { name: 'Kim Example', email: 'kim@example.invalid', under18: 'yes' });
-    expect(minor.status).toBe(400);
-    const minorHtml = await minor.text();
-    expect(minorHtml).toContain('Enter the guardian name.');
-    expect(minorHtml).toMatch(/id="walkin-under-18"[^>]*\schecked/);
-    expect(count(db, 'SELECT COUNT(*) AS n FROM signups')).toBe(0);
-
     const added = await postWalkIn(app, cookie, shiftId, {
       name: 'Kim Example',
       email: 'kim@example.invalid',
-      under18: 'yes',
-      guardianName: 'Pat Example',
-      guardianEmail: 'pat@example.invalid',
     });
     expect(added.status).toBe(303);
-    expect(count(db, "SELECT COUNT(*) AS n FROM outbox WHERE kind = 'confirmation' AND status = 'pending'")).toBe(2);
+    expect(count(db, "SELECT COUNT(*) AS n FROM outbox WHERE kind = 'confirmation' AND status = 'pending'")).toBe(1);
     const full = await (await app.request(`/admin/shifts/${shiftId}`, { headers: { cookie } })).text();
     expect(full).toContain('This shift is full.');
     expect(full).not.toContain('Add a walk-in');
@@ -558,9 +548,6 @@ describe('coordinator screens', () => {
     const added = await postWalkIn(app, cookie, sourceId, {
       name: 'Kim Example',
       email: 'kim@example.invalid',
-      under18: 'yes',
-      guardianName: 'Pat Example',
-      guardianEmail: 'pat@example.invalid',
     });
     expect(added.status).toBe(303);
     const signupId = signupIdFor(db, 'kim@example.invalid');
@@ -600,8 +587,8 @@ describe('coordinator screens', () => {
       notes: string;
       reminders_off: number;
       is_minor: number;
-      guardian_name: string;
-      guardian_email: string;
+      guardian_name: string | null;
+      guardian_email: string | null;
       shift_id: number;
     };
     expect(created).toMatchObject({
@@ -610,15 +597,15 @@ describe('coordinator screens', () => {
       phone: '712-555-0199',
       notes: 'Blue shirt',
       reminders_off: 1,
-      is_minor: 1,
-      guardian_name: 'Pat Example',
-      guardian_email: 'pat@example.invalid',
+      is_minor: 0,
+      guardian_name: null,
+      guardian_email: null,
       shift_id: destinationId,
     });
     expect(shiftVersions(db)).toEqual(versions);
-    expect(counted(db, signupId, 'confirmation', 'cancelled')).toBe(2);
+    expect(counted(db, signupId, 'confirmation', 'cancelled')).toBe(1);
     expect(db.prepare("SELECT status AS status FROM outbox WHERE kind = 'reminder'").get()).toEqual({ status: 'cancelled' });
-    expect(count(db, "SELECT COUNT(*) AS n FROM outbox WHERE kind = 'changed' AND status = 'pending'")).toBe(2);
+    expect(count(db, "SELECT COUNT(*) AS n FROM outbox WHERE kind = 'changed' AND status = 'pending'")).toBe(1);
     expect(count(db, "SELECT COUNT(*) AS n FROM outbox WHERE kind = 'cancelled'")).toBe(0);
     const letter = db.prepare("SELECT subject, body_text FROM outbox WHERE kind = 'changed' AND to_email = 'kim@example.invalid'").get() as {
       subject: string;
@@ -848,9 +835,6 @@ function reserve(db: Awaited<ReturnType<typeof buildApp>>['db'], shiftId: number
     email,
     phone: '712-555-0100',
     notes: 'Bring gloves',
-    isMinor: false,
-    guardianName: null,
-    guardianEmail: null,
     operationId,
     now: NOW,
     mail: MAIL,
@@ -999,11 +983,8 @@ function walkInBody(html: string, fields: Record<string, string>) {
     form_token: field(html, 'form_token'),
     name: fields.name ?? '',
     email: fields.email ?? '',
-    phone: fields.phone ?? '',
+    phone: fields.phone ?? '712-555-0100',
     notes: fields.notes ?? '',
-    guardianName: fields.guardianName ?? '',
-    guardianEmail: fields.guardianEmail ?? '',
-    ...(fields.under18 ? { under18: fields.under18 } : {}),
   });
 }
 

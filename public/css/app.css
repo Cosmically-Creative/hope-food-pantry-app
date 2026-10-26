@@ -1003,11 +1003,6 @@ article.shift-card {
   background: var(--hope-blue-75);
 }
 
-/* Parent or guardian stays closed until Under 18 is checked, on every signup form. */
-.signup-form:not(:has([data-under-18]:checked)) [data-guardian] {
-  display: none;
-}
-
 .signup-form legend {
   padding: 0 0.35rem;
 }

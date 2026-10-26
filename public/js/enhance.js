@@ -3,8 +3,6 @@
   bindCalendar();
   document.querySelectorAll('[data-contact]').forEach(bindContact);
   document.querySelectorAll('[data-see-more]').forEach(bindSeeMore);
-  var boxes = document.querySelectorAll('[data-under-18]');
-  for (var i = 0; i < boxes.length; i += 1) bind(boxes[i]);
 
   function bindNav() {
     var header = document.querySelector('.header');
@@ -93,19 +91,5 @@
   function setField(form, name, value) {
     var input = form.elements[name];
     if (input && 'value' in input) input.value = value;
-  }
-
-  function bind(box) {
-    var form = box.form;
-    if (!form) return;
-    var guardian = form.querySelector('[data-guardian]');
-    if (!guardian) return;
-    var inputs = guardian.querySelectorAll('input');
-    var sync = function () {
-      var on = box.checked;
-      for (var j = 0; j < inputs.length; j += 1) inputs[j].required = on;
-    };
-    box.addEventListener('change', sync);
-    sync();
   }
 })();

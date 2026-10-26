@@ -42,7 +42,7 @@ const SHIFT_PEOPLE_BODY = 'Remove everyone on this roster first.';
 const SHIFT_WAIT_BODY = 'Cancel this shift, or wait until it has ended, before removing it.';
 const SHIFT_WEEKLY_NOTE =
   'This date came from a weekly template that is still active. Add weekly shifts can put this date back. End that template first if the date should stay gone.';
-const PERSON_DELETE_BODY = 'This deletes their name, email, phone, guardian details, and notes from the roster. It does not send email.';
+const PERSON_DELETE_BODY = 'This deletes their name, email, phone, and notes from the roster. It does not send email.';
 const PERSON_WAIT_BODY = 'Cancel this signup before removing it.';
 const PERSON_CANCEL_BODY = 'Cancelling a signup emails them. Their old private link stops working, and the email includes a new one.';
 const SHIFT_CANCEL_EMPTY = 'No one is signed up. Cancelling closes the shift and does not send email.';
@@ -341,7 +341,7 @@ export function SettingsPage(props: {
         <label>
           Keep signups for, months
           <input name="retention_months" type="number" min="1" max="120" required value={props.values.retentionMonths} />
-          <span class="hint">The default is 24, counted after the shift ends. After 1:00 AM Central Time, signups older than this lose their name, email, phone, guardian, and notes in this app. A spreadsheet already downloaded is left as it is.</span>
+          <span class="hint">The default is 24, counted after the shift ends. After 1:00 AM Central Time, signups older than this lose their name, email, phone, and notes in this app. A spreadsheet already downloaded is left as it is.</span>
           {errors.retentionMonths ? <span class="error">{errors.retentionMonths}</span> : null}
         </label>
         <label>
@@ -406,18 +406,18 @@ export function ContactsPage(props: {
       <form method="post" action={appPath(props.config, '/admin/contacts/new')} class="signup-form desk-download">
         <input type="hidden" name="csrf" value={props.csrf} />
         <h2>Add a contact</h2>
-        <p>This saves one person. It does not sign them up and does not send email. The same name and email updates that person. A different name is saved separately, even with the same email. A blank phone does not erase a phone already saved. Names are capitalized. A 10-digit phone is saved with dashes, like 712-555-0100.</p>
+        <p>This saves one person. It does not sign them up and does not send email. The same name and email updates that person. A different name is saved separately, even with the same email. Names are capitalized. A 10-digit phone is saved with dashes, like 712-555-0100.</p>
         <WalkInField id="contact-first" label="First name" name="first_name" type="text" value={manual.values.firstName} error={manual.errors.firstName} />
         <WalkInField id="contact-last" label="Last name" name="last_name" type="text" value={manual.values.lastName} error={manual.errors.lastName} />
         <WalkInField id="contact-email" label="Email" name="email" type="email" value={manual.values.email} error={manual.errors.email} />
-        <WalkInField id="contact-phone" label="Phone (optional)" name="phone" type="tel" value={manual.values.phone} error={manual.errors.phone} hint="We will not text them" />
+        <WalkInField id="contact-phone" label="Phone" name="phone" type="tel" value={manual.values.phone} error={manual.errors.phone} required />
         <button type="submit">Save this contact</button>
       </form>
       <form method="post" action={appPath(props.config, '/admin/contacts/import')} class="signup-form desk-download" enctype="multipart/form-data">
         <input type="hidden" name="csrf" value={props.csrf} />
         <h2>Import a contact list</h2>
         <p>
-          Use a spreadsheet with First Name, Last Name, Email, and Phone. The SignUpGenius people export works. Address is ignored. The same name and email updates that person. A different name stays a separate person, even when the email matches. A different email stays a separate person, even when the name matches. A blank phone does not erase a phone already saved. Names are capitalized. A 10-digit phone is saved with dashes, like 712-555-0100. Email addresses are stored in lowercase. The file has to be under 64 KB.
+          Use a spreadsheet with First Name, Last Name, Email, and Phone. The SignUpGenius people export works. Address is ignored. The same name and email updates that person. A different name stays a separate person, even when the email matches. A different email stays a separate person, even when the name matches. A row without a phone is skipped. Names are capitalized. A 10-digit phone is saved with dashes, like 712-555-0100. Email addresses are stored in lowercase. The file has to be under 64 KB.
         </p>
         {props.importError ? <p class="error">{props.importError}</p> : null}
         <label>
@@ -521,19 +521,19 @@ export function ContactPage(props: {
         <input type="hidden" name="csrf" value={props.csrf} />
         <h2>Correct this contact</h2>
         <p>
-          This changes the saved person. A different name stays this contact and does not create a second person. It does not change a signup, take a spot, or send email. Names are capitalized. A 10-digit phone is saved with dashes, like 712-555-0100. A blank phone removes the saved number.
+          This changes the saved person. A different name stays this contact and does not create a second person. It does not change a signup, take a spot, or send email. Names are capitalized. A 10-digit phone is saved with dashes, like 712-555-0100.
         </p>
         <WalkInField id="correct-first" label="First name" name="first_name" type="text" value={correction.values.firstName} error={correction.errors.firstName} />
         <WalkInField id="correct-last" label="Last name" name="last_name" type="text" value={correction.values.lastName} error={correction.errors.lastName} />
         <WalkInField id="correct-email" label="Email" name="email" type="email" value={correction.values.email} error={correction.errors.email} />
         <WalkInField
           id="correct-phone"
-          label="Phone (optional)"
+          label="Phone"
           name="phone"
           type="tel"
           value={correction.values.phone}
           error={correction.errors.phone}
-          hint="We will not text them"
+          required
         />
         <button type="submit">Save this correction</button>
       </form>
@@ -568,15 +568,6 @@ export function ContactPage(props: {
             </textarea>
             {errors.notes ? <span class="field-error">{errors.notes}</span> : null}
           </label>
-          <label class="check" for="add-under-18">
-            <input id="add-under-18" name="under18" type="checkbox" value="yes" data-under-18="" checked={values.under18 ? true : undefined} />
-            They are under 18
-          </label>
-          <fieldset data-guardian="">
-            <legend>Parent or guardian</legend>
-            <WalkInField id="add-guardianName" label="Guardian name" name="guardianName" type="text" value={values.guardianName} error={errors.guardianName} />
-            <WalkInField id="add-guardianEmail" label="Guardian email" name="guardianEmail" type="email" value={values.guardianEmail} error={errors.guardianEmail} />
-          </fieldset>
           <button type="submit">Add to this shift</button>
         </form>
       ) : (
@@ -1559,7 +1550,7 @@ function WalkInForm(props: { config: AppConfig; csrf: string; shiftId: number; f
       ) : null}
       <WalkInField id="walkin-name" label="Name" name="name" type="text" value={values.name} error={errors.name} />
       <WalkInField id="walkin-email" label="Email" name="email" type="email" value={values.email} error={errors.email} />
-      <WalkInField id="walkin-phone" label="Phone (optional)" name="phone" type="tel" value={values.phone} error={errors.phone} hint="We will not text you" />
+      <WalkInField id="walkin-phone" label="Phone" name="phone" type="tel" value={values.phone} error={errors.phone} required />
       <label for="walkin-notes">
         Notes (optional)
         <textarea id="walkin-notes" name="notes" aria-invalid={errors.notes ? 'true' : undefined} aria-describedby={errors.notes ? 'walkin-notes-error' : undefined}>
@@ -1571,21 +1562,21 @@ function WalkInForm(props: { config: AppConfig; csrf: string; shiftId: number; f
           </span>
         ) : null}
       </label>
-      <label class="check" for="walkin-under-18">
-        <input id="walkin-under-18" name="under18" type="checkbox" value="yes" data-under-18="" checked={values.under18 ? true : undefined} />
-        They are under 18
-      </label>
-      <fieldset data-guardian="">
-        <legend>Parent or guardian</legend>
-        <WalkInField id="walkin-guardianName" label="Guardian name" name="guardianName" type="text" value={values.guardianName} error={errors.guardianName} />
-        <WalkInField id="walkin-guardianEmail" label="Guardian email" name="guardianEmail" type="email" value={values.guardianEmail} error={errors.guardianEmail} />
-      </fieldset>
       <button type="submit">Add to this shift</button>
     </form>
   );
 }
 
-function WalkInField(props: { id: string; label: string; name: string; type: 'text' | 'email' | 'tel'; value: string; error?: string; hint?: string }) {
+function WalkInField(props: {
+  id: string;
+  label: string;
+  name: string;
+  type: 'text' | 'email' | 'tel';
+  value: string;
+  error?: string;
+  hint?: string;
+  required?: boolean;
+}) {
   const errorId = `${props.id}-error`;
   const hintId = `${props.id}-hint`;
   const describedBy = [props.hint ? hintId : '', props.error ? errorId : ''].filter(Boolean).join(' ') || undefined;
@@ -1598,6 +1589,7 @@ function WalkInField(props: { id: string; label: string; name: string; type: 'te
         type={props.type}
         value={props.value}
         autocomplete="off"
+        required={props.required ? true : undefined}
         aria-invalid={props.error ? 'true' : undefined}
         aria-describedby={describedBy}
       />
@@ -1631,12 +1623,6 @@ function Roster(props: { config: AppConfig; csrf: string; people: RosterPerson[]
           </p>
           <p>{person.email}</p>
           {person.phone ? <p>{person.phone}</p> : null}
-          {person.minor ? <p>Under 18</p> : null}
-          {person.guardianName || person.guardianEmail ? (
-            <p>
-              Guardian: {person.guardianName} {person.guardianEmail}
-            </p>
-          ) : null}
           {person.notes ? <p>Note: {person.notes}</p> : null}
           <p>{person.status === 'confirmed' ? 'Confirmed' : 'Cancelled'}</p>
           {person.status === 'cancelled' ? (

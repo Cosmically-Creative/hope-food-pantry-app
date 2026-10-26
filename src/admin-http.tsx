@@ -556,9 +556,6 @@ async function submitAddContactToShift(c: Context, services: AdminServices): Pro
       email: parsed.draft.emailNorm,
       phone: parsed.draft.phone,
       notes: parsed.draft.notes,
-      isMinor: parsed.draft.isMinor,
-      guardianName: parsed.draft.guardianName,
-      guardianEmail: parsed.draft.guardianEmail,
       operationId: token.claims.operationId,
       now: services.now(),
       mail: mailIdentity(services.db, services.config),
@@ -1224,9 +1221,6 @@ async function submitWalkIn(c: Context, services: AdminServices): Promise<Respon
       email: parsed.draft.emailNorm,
       phone: parsed.draft.phone,
       notes: parsed.draft.notes,
-      isMinor: parsed.draft.isMinor,
-      guardianName: parsed.draft.guardianName,
-      guardianEmail: parsed.draft.guardianEmail,
       operationId: token.claims.operationId,
       now: services.now(),
       mail: mailIdentity(services.db, services.config),
@@ -1571,9 +1565,6 @@ function signupValuesFrom(body: Record<string, unknown>): SignupValues {
     email: textField(body, 'email'),
     phone: textField(body, 'phone'),
     notes: textField(body, 'notes'),
-    under18: textField(body, 'under18') === 'yes',
-    guardianName: textField(body, 'guardianName'),
-    guardianEmail: textField(body, 'guardianEmail'),
   };
 }
 

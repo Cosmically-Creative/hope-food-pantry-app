@@ -371,10 +371,8 @@ async function postSignup(
     first_name: fields.name.slice(0, fields.name.indexOf(' ')),
     last_name: fields.name.slice(fields.name.indexOf(' ') + 1),
     email: fields.email,
-    phone: '',
+    phone: '712-555-0100',
     notes: '',
-    guardianName: '',
-    guardianEmail: '',
     company_website: '',
     'cf-turnstile-response': 'widget-token',
   });

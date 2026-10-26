@@ -14,7 +14,6 @@ type DueSignup = {
   id: number;
   name: string;
   email_norm: string;
-  guardian_email: string | null;
   version: number;
   starts_at_utc: string;
   ends_at_utc: string;
@@ -38,7 +37,7 @@ export function queueDueReminders(db: Database.Database, mail: MailIdentity, sec
     const activeMail = { ...mail, replyTo: readReplyTo(db, mail.replyTo) };
     const rows = db
       .prepare(
-        `SELECT su.id AS id, su.name AS name, su.email_norm AS email_norm, su.guardian_email AS guardian_email,
+        `SELECT su.id AS id, su.name AS name, su.email_norm AS email_norm,
                 su.shift_id AS shift_id, s.version AS version, s.starts_at_utc AS starts_at_utc,
                 s.ends_at_utc AS ends_at_utc, s.role AS role,
                 e.title AS title, e.location AS location, e.tz AS tz
@@ -129,7 +128,7 @@ function insertReminder(
 ): boolean {
   const unsubscribeUrl = absoluteUrl(mail, `/u/${issueReminderOffToken(secret, row.id)}`);
   const headers = reminderHeaders(mail, unsubscribeUrl);
-  const volunteerId = insertOutbox(db, row, kind, row.email_norm, 'volunteer', mail, headers, unsubscribeUrl, now, mode);
+  const volunteerId = insertOutbox(db, row, kind, mail, headers, unsubscribeUrl, now, mode);
   if (volunteerId === null) return false;
   const saved = db
     .prepare(
@@ -138,19 +137,13 @@ function insertReminder(
        ON CONFLICT (signup_id, kind, shift_version) DO NOTHING`,
     )
     .run(row.id, kind, row.version, volunteerId, now);
-  if (saved.changes !== 1) return false;
-  if (mode === 'pending' && row.guardian_email && row.guardian_email !== row.email_norm) {
-    insertOutbox(db, row, kind, row.guardian_email, 'guardian', mail, headers, unsubscribeUrl, now, 'pending');
-  }
-  return true;
+  return saved.changes === 1;
 }
 
 function insertOutbox(
   db: Database.Database,
   row: DueSignup,
   kind: string,
-  recipient: string,
-  audience: 'volunteer' | 'guardian',
   mail: MailIdentity,
   headers: Record<string, string>,
   unsubscribeUrl: string,
@@ -159,7 +152,6 @@ function insertOutbox(
 ): number | null {
   const rendered = mode === 'pending'
     ? renderReminder({
-        audience,
         volunteerName: row.name,
         shift: shiftFacts(row),
         unsubscribeUrl,
@@ -175,10 +167,10 @@ function insertOutbox(
        ON CONFLICT (dedupe_key) DO NOTHING`,
     )
     .run(
-      `reminder:v${row.version}:${row.id}:${kind}:${recipient}`,
+      `reminder:v${row.version}:${row.id}:${kind}:${row.email_norm}`,
       row.id,
       row.shift_id,
-      recipient,
+      row.email_norm,
       rendered.subject,
       rendered.text,
       rendered.html,

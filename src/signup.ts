@@ -15,9 +15,6 @@ export type ReserveInput = {
   email: string;
   phone: string | null;
   notes: string | null;
-  isMinor: boolean;
-  guardianName: string | null;
-  guardianEmail: string | null;
   operationId: string;
   now: string;
   mail: MailIdentity;
@@ -36,9 +33,6 @@ export type ManageView = {
   email: string;
   phone: string | null;
   notes: string | null;
-  isMinor: boolean;
-  guardianName: string | null;
-  guardianEmail: string | null;
   status: 'confirmed' | 'cancelled';
   remindersOff: boolean;
   emailNorm: string;
@@ -109,9 +103,6 @@ export function readManageSignup(db: Database.Database, token: string, now: stri
          su.email AS email,
          su.phone AS phone,
          su.notes AS notes,
-         su.is_minor AS is_minor,
-         su.guardian_name AS guardian_name,
-         su.guardian_email AS guardian_email,
          su.status AS status,
          su.reminders_off AS reminders_off,
          su.email_norm AS email_norm,
@@ -138,9 +129,6 @@ export function readManageSignup(db: Database.Database, token: string, now: stri
     email: row.email,
     phone: row.phone,
     notes: row.notes,
-    isMinor: row.is_minor === 1,
-    guardianName: row.guardian_name,
-    guardianEmail: row.guardian_email,
     status: row.status,
     remindersOff: row.reminders_off === 1,
     emailNorm: row.email_norm,
@@ -214,9 +202,9 @@ function placeReservation(db: Database.Database, input: ReserveInput, emailNorm:
       emailNorm,
       emailNorm,
       input.phone,
-      input.isMinor ? 1 : 0,
-      input.isMinor ? input.guardianName : null,
-      input.isMinor ? input.guardianEmail : null,
+      0,
+      null,
+      null,
       input.notes,
       sha256(manageToken),
       expiresAt,
@@ -232,7 +220,6 @@ function placeReservation(db: Database.Database, input: ReserveInput, emailNorm:
     token: manageToken,
     volunteerName: input.name,
     volunteerEmail: emailNorm,
-    guardianEmail: input.isMinor ? input.guardianEmail : null,
     shift: shiftFacts(shift).facts,
     mail: input.mail,
     now: input.now,
@@ -282,7 +269,7 @@ function cancelConfirmed(db: Database.Database, hash: string, token: string, now
   const row = db
     .prepare(
       `SELECT su.id AS id, su.status AS status, su.token_expires_at AS token_expires_at, su.anonymized_at AS anonymized_at,
-              su.name AS name, su.email_norm AS email_norm, su.guardian_email AS guardian_email, su.shift_id AS shift_id
+              su.name AS name, su.email_norm AS email_norm, su.shift_id AS shift_id
        FROM signups su
        WHERE su.manage_token_hash = ?`,
     )
@@ -294,7 +281,6 @@ function cancelConfirmed(db: Database.Database, hash: string, token: string, now
         anonymized_at: string | null;
         name: string | null;
         email_norm: string | null;
-        guardian_email: string | null;
         shift_id: number;
       }
     | undefined;
@@ -322,7 +308,6 @@ function cancelConfirmed(db: Database.Database, hash: string, token: string, now
         token,
         volunteerName: row.name,
         volunteerEmail: row.email_norm,
-        guardianEmail: row.guardian_email,
         shift: shift.facts,
         mail,
         now,
@@ -405,9 +390,6 @@ type ManageRow = {
   email_norm: string | null;
   phone: string | null;
   notes: string | null;
-  is_minor: number;
-  guardian_name: string | null;
-  guardian_email: string | null;
   status: string;
   reminders_off: number;
   token_expires_at: string | null;

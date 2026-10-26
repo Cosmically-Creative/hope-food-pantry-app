@@ -24,8 +24,7 @@ afterEach(() => {
 describe('public switch limits', () => {
   it('stops the repeated-switch mail attack despite new tokens, ids, IPs, and a reopened database', async () => {
     const f = await fixture();
-    // A shared volunteer/guardian mailbox must count only once per switch.
-    let link = f.signup('target@example.invalid', 'target@example.invalid');
+    let link = f.signup('target@example.invalid');
     let app = f.app();
     let accepted = 0;
     const mailer = { send: async () => { accepted++; return { result: 'sent' as const, providerId: 'mock' }; } };
@@ -59,21 +58,19 @@ describe('public switch limits', () => {
     expect((await switchTo(tomorrow, link, f.shifts[0]!)).status).toBe(303);
   });
 
-  it('shares guardian limits across children, IPs, and recipient roles without charging blocked co-recipients', async () => {
+  it('shares recipient limits across different people at the same email without charging blocked co-recipients', async () => {
     const f = await fixture();
     const app = f.app();
     for (let i = 0; i < SWITCH_RECIPIENT_LIMIT; i++) {
-      const link = f.signup(`child${i}@example.invalid`, 'guardian@example.invalid');
+      const link = f.signup('shared@example.invalid', `Person ${i}`);
       expect((await switchTo(app, link, f.shifts[1]!, `203.0.113.${i + 1}`)).status).toBe(303);
     }
-    const blocked = f.signup('new-child@example.invalid', 'guardian@example.invalid');
+    const blocked = f.signup('shared@example.invalid', 'Blocked Person');
     const before = records(f.db);
     expect((await switchTo(app, blocked, f.shifts[1]!, '203.0.113.99')).status).toBe(429);
     expect(records(f.db)).toEqual(before);
-    const reversed = f.signup('guardian@example.invalid', 'other@example.invalid');
-    expect((await switchTo(app, reversed, f.shifts[1]!, '203.0.113.98')).status).toBe(429);
-    // Rejection must not spend this child's allowance on otherwise valid links.
-    let ownLink = f.signup('new-child@example.invalid', null, 'Another person');
+    // Rejection must not spend this person's allowance on an otherwise valid link.
+    let ownLink = f.signup('other@example.invalid', 'Other Person');
     for (let i = 0; i < SWITCH_RECIPIENT_LIMIT; i++) {
       const response = await switchTo(app, ownLink, f.shifts[(i + 1) % 2]!, '203.0.113.97');
       expect(response.status).toBe(303);
@@ -117,7 +114,7 @@ describe('public switch limits', () => {
     const f = await fixture();
     const app = f.app();
     const requests = Array.from({ length: SWITCH_RECIPIENT_LIMIT + 1 }, (_, i) => {
-      const link = f.signup(`parallel${i}@example.invalid`, 'shared@example.invalid');
+      const link = f.signup('shared@example.invalid', `Parallel ${i}`);
       return switchTo(app, link, f.shifts[1]!, `203.0.113.${i + 1}`);
     });
     const responses = await Promise.all(requests);
@@ -169,10 +166,9 @@ async function fixture() {
   return {
     db, config, shifts,
     app: (now = NOW) => createApp(config, db, { now, clientIp: (c) => c.req.header('x-test-ip') ?? null }),
-    signup: (email: string, guardianEmail: string | null = null, name = 'Test Person') => {
+    signup: (email: string, name = 'Test Person') => {
       const result = reserveSignup(db, {
-        shiftId: shifts[0]!, name, email, guardianEmail, isMinor: guardianEmail !== null,
-        guardianName: guardianEmail ? 'Guardian' : null, phone: null, notes: null,
+        shiftId: shifts[0]!, name, email, phone: null, notes: null,
         operationId: randomBytes(16).toString('hex'), now: NOW, mail,
       });
       if (!result.ok || !result.manageToken) throw new Error('Fixture signup failed');

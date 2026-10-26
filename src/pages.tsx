@@ -353,15 +353,6 @@ export function ManagePage(props: {
             <dd>{signup.phone}</dd>
           </div>
         ) : null}
-        {signup.isMinor ? (
-          <div>
-            <dt>Guardian</dt>
-            <dd>
-              {signup.guardianName}
-              {signup.guardianEmail ? ` (${signup.guardianEmail})` : ''}
-            </dd>
-          </div>
-        ) : null}
         {signup.notes ? (
           <div>
             <dt>Notes</dt>
@@ -713,7 +704,7 @@ function SignupForm(props: { config: AppConfig; shiftId: number; form: SignupFor
   return (
     <form class="signup-form" method="post" action={appPath(props.config, `/s/${props.shiftId}`)}>
       <h2>Sign up</h2>
-      <p>Each signup is for one person and takes one spot. Another person can use the same email address. If you are under 18, add a parent or guardian.</p>
+      <p>Each signup is for one person and takes one spot. Another person can use the same email address.</p>
       <noscript>
         <p class="error">Signing up needs JavaScript for the abuse check. The pantry has not published a contact method for help with signup.</p>
       </noscript>
@@ -761,13 +752,13 @@ function SignupForm(props: { config: AppConfig; shiftId: number; form: SignupFor
       <Field id="signup-email" label="Email" name="email" type="email" value={form.values.email} error={errors.email} autoComplete="email" />
       <Field
         id="signup-phone"
-        label="Phone (optional)"
+        label="Phone"
         name="phone"
         type="tel"
         value={form.values.phone}
         error={errors.phone}
         autoComplete="tel"
-        hint="We will not text you"
+        required
       />
       <label for="signup-notes">
         Notes (optional)
@@ -780,31 +771,6 @@ function SignupForm(props: { config: AppConfig; shiftId: number; form: SignupFor
           </span>
         ) : null}
       </label>
-      <label class="check" for="signup-under-18">
-        <input id="signup-under-18" name="under18" type="checkbox" value="yes" data-under-18="" checked={form.values.under18 ? true : undefined} />
-        I am under 18
-      </label>
-      <fieldset data-guardian="">
-        <legend>Parent or guardian</legend>
-        <Field
-          id="signup-guardianName"
-          label="Guardian name"
-          name="guardianName"
-          type="text"
-          value={form.values.guardianName}
-          error={errors.guardianName}
-          autoComplete="name"
-        />
-        <Field
-          id="signup-guardianEmail"
-          label="Guardian email"
-          name="guardianEmail"
-          type="email"
-          value={form.values.guardianEmail}
-          error={errors.guardianEmail}
-          autoComplete="email"
-        />
-      </fieldset>
       <div class="cf-turnstile" data-sitekey={form.siteKey} data-action="signup" />
       <p id="signup-turnstile-hint">This check confirms the signup came from a browser.</p>
       <button type="submit">Sign up</button>

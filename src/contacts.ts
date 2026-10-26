@@ -16,13 +16,13 @@ const MAX_SKIPS = 30;
 const CONTROL = /[\u0000-\u001F\u007F]/;
 
 export const CONTACT_CSV_EMPTY = 'Choose a spreadsheet to import.';
-export const CONTACT_CSV_COLUMNS = 'This spreadsheet needs First Name, Last Name, and Email columns.';
+export const CONTACT_CSV_COLUMNS = 'This spreadsheet needs First Name, Last Name, Email, and Phone columns.';
 export const CONTACT_CSV_READ = 'This spreadsheet could not be read.';
 export const CONTACT_CSV_LARGE = 'This spreadsheet has more than 2000 people.';
 export const CONTACT_CSV_BINARY = 'Save the spreadsheet as CSV.';
 export const CONTACT_CSV_LIMIT = 'This spreadsheet has to be under 64 KB.';
 
-export type ContactSkipCode = 'e' | 'n' | 'p' | 'l' | 'c';
+export type ContactSkipCode = 'e' | 'n' | 'p' | 'm' | 'l' | 'c';
 
 export type ContactSkip = { line: number; code: ContactSkipCode };
 
@@ -71,6 +71,7 @@ const SKIP_REASON: Record<ContactSkipCode, string> = {
   e: 'the email is not an address',
   n: 'the name is missing',
   p: 'the phone is too long',
+  m: 'the phone is missing',
   l: 'the name is too long',
   c: 'a field has a line break',
 };
@@ -108,7 +109,7 @@ export function parseContactSkips(value: string | undefined): ContactSkip[] {
   if (!value) return [];
   const skips: ContactSkip[] = [];
   for (const part of value.split('.')) {
-    const match = /^(\d+)([enplc])$/.exec(part);
+    const match = /^(\d+)([enplcm])$/.exec(part);
     if (!match) continue;
     const line = Number(match[1]);
     const code = match[2];
@@ -224,7 +225,7 @@ export function removeContact(db: Database.Database, coordinatorId: number, id: 
 /**
  * Saves the person from a confirmed signup.
  * The same name and email updates that contact. A different name is a new contact, even with the same email.
- * A blank phone does not erase a phone already saved.
+ * A blank phone does not erase a phone already saved (legacy or cleared records).
  */
 export function rememberSignupContact(
   db: Database.Database,
@@ -267,7 +268,7 @@ export function saveManualContact(
 
 /**
  * Replaces the name, email, and phone on one saved contact.
- * A different name stays this contact. A blank phone removes the saved number.
+ * A different name stays this contact. Phone is required.
  */
 export function correctContact(
   db: Database.Database,
@@ -346,7 +347,7 @@ function columnIndex(cells: string[]): { first: number; last: number; email: num
   const last = names.indexOf('last name');
   const email = names.indexOf('email');
   const phone = names.indexOf('phone');
-  if (first < 0 || last < 0 || email < 0) return null;
+  if (first < 0 || last < 0 || email < 0 || phone < 0) return null;
   return { first, last, email, phone };
 }
 
@@ -382,7 +383,8 @@ function manualContact(values: ContactManualValues): { ok: true; person: ReadyCo
   if (firstName && lastName && !errors.firstName && !errors.lastName && `${firstName} ${lastName}`.length > MAX_NAME) {
     errors.lastName = `Use ${MAX_NAME} characters or fewer for the full name.`;
   }
-  if (CONTROL.test(phoneRaw)) errors.phone = 'Enter a phone number without line breaks.';
+  if (!phoneRaw || !phone) errors.phone = 'Enter a phone number.';
+  else if (CONTROL.test(phoneRaw)) errors.phone = 'Enter a phone number without line breaks.';
   else if (phoneRaw.length > MAX_PHONE || phone.length > MAX_PHONE) errors.phone = `Use ${MAX_PHONE} characters or fewer.`;
   let email = '';
   const emailRaw = values.email.normalize('NFC').trim();
@@ -396,8 +398,8 @@ function manualContact(values: ContactManualValues): { ok: true; person: ReadyCo
       errors.email = err instanceof EmailAddressError ? err.message : 'Enter an email address.';
     }
   }
-  if (Object.keys(errors).length > 0 || !email) return { ok: false, errors };
-  return { ok: true, person: { firstName, lastName, email, phone: phone.length === 0 ? null : phone } };
+  if (Object.keys(errors).length > 0 || !email || !phone) return { ok: false, errors };
+  return { ok: true, person: { firstName, lastName, email, phone } };
 }
 
 function findContact(
@@ -453,16 +455,19 @@ function parsePerson(cells: string[], columns: { first: number; last: number; em
   const last = capitalizeName(lastName);
   if (!first || !last) return { code: 'n' };
   if (first.length > MAX_NAME || last.length > MAX_NAME || `${first} ${last}`.length > MAX_NAME) return { code: 'l' };
-  const phone = phoneRaw.length === 0 ? '' : formatPhone(phoneRaw);
-  if (phoneRaw.length > MAX_PHONE || phone.length > MAX_PHONE) return { code: 'p' };
+  let email = '';
   try {
-    const email = normalizeEmail(emailRaw);
+    email = normalizeEmail(emailRaw);
     if (email.length > MAX_EMAIL) return { code: 'e' };
-    return { firstName: first, lastName: last, email, phone: phone.length === 0 ? null : phone };
   } catch (err) {
     if (err instanceof EmailAddressError) return { code: 'e' };
     throw err;
   }
+  if (!phoneRaw) return { code: 'm' };
+  const phone = formatPhone(phoneRaw);
+  if (!phone) return { code: 'm' };
+  if (phoneRaw.length > MAX_PHONE || phone.length > MAX_PHONE) return { code: 'p' };
+  return { firstName: first, lastName: last, email, phone };
 }
 
 function cellAt(cells: string[], index: number): string {
@@ -533,5 +538,5 @@ function parseCsv(text: string): { line: number; cells: string[] }[] {
 }
 
 function isSkipCode(value: string): value is ContactSkipCode {
-  return value === 'e' || value === 'n' || value === 'p' || value === 'l' || value === 'c';
+  return value === 'e' || value === 'n' || value === 'p' || value === 'm' || value === 'l' || value === 'c';
 }

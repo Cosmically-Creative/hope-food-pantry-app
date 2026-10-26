@@ -10,7 +10,7 @@ import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { openAppDatabase } from '../src/db.js';
 import { issueFormToken, MIN_FILL_MS } from '../src/form-token.js';
-import { SIGNUP_EMAIL_LIMIT, SIGNUP_GUARDIAN_LIMIT, SIGNUP_IP_LIMIT } from '../src/rate-limit.js';
+import { SIGNUP_EMAIL_LIMIT, SIGNUP_IP_LIMIT } from '../src/rate-limit.js';
 import type { ReserveInput } from '../src/signup.js';
 import { verifyTurnstile, type TurnstileVerdict } from '../src/turnstile.js';
 import { devEnv } from './env.js';
@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe('capacity-safe signup', () => {
-  it('requires a first name and a last name', async () => {
+  it('requires a first name, a last name, and a phone number', async () => {
     const { app, shiftId } = await buildApp();
     const missingLast = await postSignup(app, shiftId, { firstName: 'Pat', lastName: '', email: 'pat.only@example.invalid' }, { ip: '203.0.113.11' });
     expect(missingLast.status).toBe(400);
@@ -36,6 +36,14 @@ describe('capacity-safe signup', () => {
     const missingFirst = await postSignup(app, shiftId, { firstName: ' ', lastName: 'Review', email: 'review.only@example.invalid' }, { ip: '203.0.113.12' });
     expect(missingFirst.status).toBe(400);
     expect(await missingFirst.text()).toContain('Enter your first name.');
+    const missingPhone = await postSignup(
+      app,
+      shiftId,
+      { firstName: 'Pat', lastName: 'Review', email: 'pat.phone@example.invalid', phone: '' },
+      { ip: '203.0.113.13' },
+    );
+    expect(missingPhone.status).toBe(400);
+    expect(await missingPhone.text()).toContain('Enter your phone number.');
   });
 
   it('saves one person, shows a private confirmation link, and does not send mail', async () => {
@@ -131,39 +139,16 @@ describe('capacity-safe signup', () => {
     ]);
   });
 
-  it('requires a guardian for a minor and ignores guardian fields for an adult', async () => {
+  it('stores new signups as adults with null guardian fields', async () => {
     const { app, shiftId, db } = await buildApp({ capacity: 2 });
-    const missing = await postSignup(app, shiftId, { under18: true, email: 'minor@example.invalid' }, { ip: '203.0.113.41' });
-    expect(missing.status).toBe(400);
-    const missingHtml = await missing.text();
-    expect(missingHtml).toContain('Enter the guardian name.');
-    expect(missingHtml).toMatch(/id="signup-under-18"[^>]*\schecked/);
-    expect(db.prepare('SELECT COUNT(*) AS n FROM signups').get()).toEqual({ n: 0 });
-
-    const minor = await postSignup(
-      app,
-      shiftId,
-      {
-        name: 'minor pat',
-        email: 'minor@example.invalid',
-        under18: true,
-        guardianName: 'guardian pat',
-        guardianEmail: 'Guardian.Pat@Example.invalid',
-      },
-      { ip: '203.0.113.42' },
-    );
-    expect(minor.status).toBe(303);
-    const adult = await postSignup(
-      app,
-      shiftId,
-      { email: 'adult@example.invalid', guardianName: 'Should Not Store', guardianEmail: 'nope@example.invalid' },
-      { ip: '203.0.113.43' },
-    );
-    expect(adult.status).toBe(303);
+    const first = await postSignup(app, shiftId, { email: 'one@example.invalid' }, { ip: '203.0.113.41' });
+    expect(first.status).toBe(303);
+    const second = await postSignup(app, shiftId, { email: 'two@example.invalid' }, { ip: '203.0.113.42' });
+    expect(second.status).toBe(303);
     const stored = db.prepare('SELECT email_norm, is_minor, guardian_name, guardian_email, group_size FROM signups ORDER BY id').all();
     expect(stored).toEqual([
-      { email_norm: 'minor@example.invalid', is_minor: 1, guardian_name: 'Guardian Pat', guardian_email: 'guardian.pat@example.invalid', group_size: 1 },
-      { email_norm: 'adult@example.invalid', is_minor: 0, guardian_name: null, guardian_email: null, group_size: 1 },
+      { email_norm: 'one@example.invalid', is_minor: 0, guardian_name: null, guardian_email: null, group_size: 1 },
+      { email_norm: 'two@example.invalid', is_minor: 0, guardian_name: null, guardian_email: null, group_size: 1 },
     ]);
   });
 
@@ -225,34 +210,6 @@ describe('capacity-safe signup', () => {
     expect(JSON.stringify(keys)).not.toContain('198.51.100.10');
   });
 
-  it('limits signups that mail one guardian, even from different volunteer addresses', async () => {
-    const { app, db } = await buildApp({ capacity: 8 });
-    const shiftId = insertExtraShift(db, { capacity: 8 });
-    const minor = (index: number) => ({
-      name: `Minor ${index}`,
-      email: `minor-${index}@example.invalid`,
-      under18: true,
-      guardianName: 'Guardian Pat',
-      guardianEmail: 'target@example.invalid',
-    });
-    for (let index = 0; index < SIGNUP_GUARDIAN_LIMIT; index += 1) {
-      const response = await postSignup(app, shiftId, minor(index), { ip: `198.51.100.${120 + index}` });
-      expect(response.status).toBe(303);
-    }
-    const blocked = await postSignup(app, shiftId, minor(99), { ip: '198.51.100.140' });
-    expect(blocked.status).toBe(429);
-    expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
-    expect(JSON.stringify(db.prepare('SELECT key FROM rate_hits').all())).not.toContain('target@example.invalid');
-
-    const sameAddress = await postSignup(
-      app,
-      shiftId,
-      { name: 'Own Guardian', email: 'family@example.invalid', under18: true, guardianName: 'Parent', guardianEmail: 'family@example.invalid' },
-      { ip: '198.51.100.141' },
-    );
-    expect(sameAddress.status).toBe(303);
-  });
-
   it('does not let a cross-site signup post use up the network allowance', async () => {
     const { app, shiftId } = await buildApp({ capacity: 2 });
     for (let index = 0; index < SIGNUP_IP_LIMIT; index += 1) {
@@ -311,9 +268,6 @@ describe('capacity-safe signup', () => {
           email: `person-${index}@example.invalid`,
           phone: null,
           notes: null,
-          isMinor: false,
-          guardianName: null,
-          guardianEmail: null,
           operationId: `operation-${index}-abcdef`,
           now: NOW,
           mail: {
@@ -421,9 +375,6 @@ async function postSignup(
     email: string;
     phone: string;
     notes: string;
-    under18: boolean;
-    guardianName: string;
-    guardianEmail: string;
     company: string;
   }>,
   options?: { token?: string; issuedAt?: number; ip?: string; origin?: string; forwardedFor?: string; site?: string },
@@ -441,14 +392,11 @@ async function postSignup(
     first_name: fields.firstName ?? (splitAt === -1 ? postedName : postedName.slice(0, splitAt)),
     last_name: fields.lastName ?? (splitAt === -1 ? '' : postedName.slice(splitAt + 1).trim()),
     email: fields.email ?? 'pat.review@example.invalid',
-    phone: fields.phone ?? '',
+    phone: fields.phone ?? '712-555-0100',
     notes: fields.notes ?? '',
-    guardianName: fields.guardianName ?? '',
-    guardianEmail: fields.guardianEmail ?? '',
     company_website: fields.company ?? '',
     'cf-turnstile-response': 'widget-token',
   });
-  if (fields.under18) body.set('under18', 'yes');
   return app.request(`/s/${shiftId}`, {
     method: 'POST',
     headers: {

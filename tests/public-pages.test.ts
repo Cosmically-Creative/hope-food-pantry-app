@@ -117,13 +117,13 @@ describe('public pages', () => {
     expect(shiftHtml).toContain('name="last_name"');
     expect(shiftHtml).toContain('First name');
     expect(shiftHtml).toContain('Last name');
-    expect(shiftHtml).toContain('We will not text you');
     expect(shiftHtml).toContain('https://challenges.cloudflare.com/turnstile/v0/api.js');
-    expect(shiftHtml).toContain('data-under-18');
-    expect(shiftHtml).toContain('data-guardian');
-    expect(shiftHtml).not.toMatch(/id="signup-under-18"[^>]*\schecked/);
+    expect(shiftHtml).not.toContain('data-under-18');
+    expect(shiftHtml).not.toContain('data-guardian');
+    expect(shiftHtml).not.toContain('I am under 18');
     const css = await (await app.request('/css/app.css')).text();
-    expect(css).toContain('.signup-form:not(:has([data-under-18]:checked)) [data-guardian]');
+    expect(css).not.toContain('data-under-18');
+    expect(css).not.toContain('data-guardian');
     expect(shiftHtml).not.toContain('SECRET-SHIFT-NOTE');
     expect(shiftHtml).not.toContain('Secret Person');
 

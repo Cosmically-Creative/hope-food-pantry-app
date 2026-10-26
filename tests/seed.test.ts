@@ -61,9 +61,9 @@ describe('development seed', () => {
       for (const signup of signups) {
         expect(signup.email.endsWith(`@${SEED_EMAIL_DOMAIN}`)).toBe(true);
         expect(signup.group_size).toBe(1);
+        expect(signup.is_minor).toBe(0);
+        expect(signup.guardian_email).toBeNull();
       }
-      const minor = signups.find((signup) => signup.is_minor === 1);
-      expect(minor?.guardian_email).toBe(`pat.fake@${SEED_EMAIL_DOMAIN}`);
       expect(signups.some((signup) => signup.status === 'cancelled')).toBe(true);
       expect(db.prepare('SELECT COUNT(*) AS n FROM coordinators').get()).toEqual({ n: 0 });
       expect(() => seedDevelopment(db, config, { today: '2026-10-14' })).toThrow(/already has events/);

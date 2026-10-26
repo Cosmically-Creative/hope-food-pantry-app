@@ -36,7 +36,6 @@ afterEach(() => {
 describe('transactional mail', () => {
   it('escapes the person\'s name in HTML and keeps the subject on one line', () => {
     const rendered = renderConfirmation({
-      audience: 'volunteer',
       volunteerName: 'Pat <script>\nReview',
       shift: { role: 'Sorting', eventTitle: 'Weekly pantry', location: 'Sioux Center, Iowa', whenLabel: 'Thursday, October 15, 2026, 9:00 AM to 12:00 PM CDT' },
       manageUrl: 'http://127.0.0.1:3000/m/token-value-abcdefghijk',
@@ -49,22 +48,21 @@ describe('transactional mail', () => {
     expect(rendered.text).toContain('http://127.0.0.1:3000/m/token-value-abcdefghijk');
   });
 
-  it('queues one confirmation, a guardian copy when the address differs, and no second copy on replay', async () => {
+  it('queues one confirmation and no second copy on replay', async () => {
     const { db, shiftId } = await buildDb();
-    const saved = reserveSignup(db, reservation(shiftId, { email: 'minor@example.invalid', isMinor: true, guardianEmail: 'guardian@example.invalid', name: 'Minor Pat' }));
+    const saved = reserveSignup(db, reservation(shiftId, { email: 'pat@example.invalid', name: 'Pat Review' }));
     expect(saved.ok).toBe(true);
     const rows = db.prepare('SELECT to_email, kind, status FROM outbox ORDER BY id').all();
     expect(rows).toEqual([
-      { to_email: 'minor@example.invalid', kind: 'confirmation', status: 'pending' },
-      { to_email: 'guardian@example.invalid', kind: 'confirmation', status: 'pending' },
+      { to_email: 'pat@example.invalid', kind: 'confirmation', status: 'pending' },
     ]);
-    const same = reserveSignup(db, reservation(shiftId, { email: 'minor@example.invalid', isMinor: true, guardianEmail: 'guardian@example.invalid', name: 'Minor Pat', operationId: 'same-operation' }));
+    const same = reserveSignup(db, reservation(shiftId, { email: 'pat@example.invalid', name: 'Pat Review', operationId: 'same-operation' }));
     expect(same.ok && same.replay).toBe(true);
-    expect(db.prepare('SELECT COUNT(*) AS n FROM outbox').get()).toEqual({ n: 2 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM outbox').get()).toEqual({ n: 1 });
 
-    const shared = reserveSignup(db, reservation(shiftId, { email: 'shared@example.invalid', isMinor: true, guardianEmail: 'shared@example.invalid', operationId: 'shared-operation' }));
-    expect(shared.ok).toBe(true);
-    expect(db.prepare("SELECT COUNT(*) AS n FROM outbox WHERE to_email = 'shared@example.invalid'").get()).toEqual({ n: 1 });
+    const other = reserveSignup(db, reservation(shiftId, { email: 'other@example.invalid', operationId: 'other-operation' }));
+    expect(other.ok).toBe(true);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM outbox WHERE to_email = 'other@example.invalid'").get()).toEqual({ n: 1 });
   });
 
   it('sends the queued letter once and does not send it again', async () => {
@@ -181,10 +179,8 @@ describe('transactional mail', () => {
       first_name: 'Listed',
       last_name: 'Person',
       email: 'listed@example.invalid',
-      phone: '',
+      phone: '712-555-0100',
       notes: '',
-      guardianName: '',
-      guardianEmail: '',
       company_website: '',
       'cf-turnstile-response': 'widget-token',
     });
@@ -340,9 +336,6 @@ function reservation(shiftId: number, overrides: Partial<ReserveInput> = {}): Re
     email: 'pat.review@example.invalid',
     phone: null,
     notes: null,
-    isMinor: false,
-    guardianName: overrides.isMinor ? 'Guardian Pat' : null,
-    guardianEmail: null,
     operationId: 'same-operation',
     now: NOW,
     mail: MAIL,

@@ -16,9 +16,6 @@ const COLUMNS = [
   'Email',
   'Phone',
   'Group size',
-  'Minor',
-  'Guardian name',
-  'Guardian email',
   'Notes',
   'Status',
   'Attended',
@@ -35,9 +32,6 @@ type RosterRecord = {
   email: string | null;
   phone: string | null;
   group_size: number;
-  is_minor: number;
-  guardian_name: string | null;
-  guardian_email: string | null;
   notes: string | null;
   status: string;
   attended: number | null;
@@ -46,7 +40,6 @@ type RosterRecord = {
 
 const ROSTER_SQL = `SELECT s.starts_at_utc AS starts_at_utc, s.ends_at_utc AS ends_at_utc, e.tz AS tz, s.role AS role,
             su.name AS name, su.email AS email, su.phone AS phone, su.group_size AS group_size,
-            su.is_minor AS is_minor, su.guardian_name AS guardian_name, su.guardian_email AS guardian_email,
             su.notes AS notes, su.status AS status, su.attended AS attended, su.anonymized_at AS anonymized_at
      FROM signups su
      JOIN shifts s ON s.id = su.shift_id
@@ -136,9 +129,6 @@ function present(row: RosterRecord): string[] {
     row.email ?? '',
     row.phone ?? '',
     String(row.group_size),
-    row.anonymized_at ? '' : row.is_minor === 1 ? 'Yes' : 'No',
-    row.guardian_name ?? '',
-    row.guardian_email ?? '',
     row.notes ?? '',
     row.status === 'cancelled' ? 'Cancelled' : 'Confirmed',
     row.attended === 1 ? 'Attended' : row.attended === 0 ? 'No-show' : '',

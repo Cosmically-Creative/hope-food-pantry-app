@@ -24,7 +24,7 @@ import {
   type SignupFormView,
   type SwitchForm,
 } from './pages.js';
-import { recordInvalidManageToken, recordSignupEmail, recordSignupGuardian, recordSignupIp, recordSwitchAttempt } from './rate-limit.js';
+import { recordInvalidManageToken, recordSignupEmail, recordSignupIp, recordSwitchAttempt } from './rate-limit.js';
 import { getPublicShift, type PublicShift } from './schedule.js';
 import { EMPTY_SIGNUP, parseSignupForm, type SignupErrors, type SignupValues } from './signup-form.js';
 import type { MailIdentity } from './mail/types.js';
@@ -154,13 +154,6 @@ async function submitSignup(c: Context, services: SignupServices): Promise<Respo
   if (emailLimit.limited) {
     return shiftResponse(c, services, shift, 429, formFor(services, shift, values, {}, textField(body, 'form_token')), TOO_MANY, emailLimit.retryAfter);
   }
-  const guardianEmail = parsed.draft.guardianEmailNorm;
-  if (guardianEmail && guardianEmail !== parsed.draft.emailNorm) {
-    const guardianLimit = recordSignupGuardian(db, config.sessionSecret, now, config.defaultTimeZone, guardianEmail);
-    if (guardianLimit.limited) {
-      return shiftResponse(c, services, shift, 429, formFor(services, shift, values, {}, textField(body, 'form_token')), TOO_MANY, guardianLimit.retryAfter);
-    }
-  }
   try {
     const reserved = reserveSignup(db, {
       shiftId: shift.id,
@@ -168,9 +161,6 @@ async function submitSignup(c: Context, services: SignupServices): Promise<Respo
       email: parsed.draft.emailNorm,
       phone: parsed.draft.phone,
       notes: parsed.draft.notes,
-      isMinor: parsed.draft.isMinor,
-      guardianName: parsed.draft.guardianName,
-      guardianEmail: parsed.draft.guardianEmail,
       operationId: tokenResult.claims.operationId,
       now,
       mail: mailIdentity(db, config),
@@ -284,9 +274,6 @@ function valuesFrom(body: Record<string, unknown>): SignupValues {
     email: textField(body, 'email'),
     phone: textField(body, 'phone'),
     notes: textField(body, 'notes'),
-    under18: textField(body, 'under18') === 'yes',
-    guardianName: textField(body, 'guardianName'),
-    guardianEmail: textField(body, 'guardianEmail'),
   };
 }
 
@@ -381,10 +368,8 @@ async function submitSwitch(c: Context, services: SignupServices): Promise<Respo
   if (!formToken.ok) return showManage(c, services, token, 400, SWITCH_STALE);
   try {
     const ip = clientAddress(services.config.trustProxy, peerAddress(c, services.clientIp), c.req.header('x-forwarded-for'));
-    const recipients = [signup.emailNorm];
-    if (signup.isMinor && signup.guardianEmail) recipients.push(signup.guardianEmail);
     const limit = recordSwitchAttempt(
-      services.db, services.config.sessionSecret, services.now(), services.config.defaultTimeZone, ip, recipients,
+      services.db, services.config.sessionSecret, services.now(), services.config.defaultTimeZone, ip, [signup.emailNorm],
     );
     if (limit.limited) {
       c.header('Retry-After', String(limit.retryAfter));
