@@ -664,7 +664,8 @@ main a:hover {
 
 .day-card-head h2 {
   margin: 0;
-  font-size: clamp(1.6rem, 3vw, 2.1rem);
+  font-size: 1.35rem;
+  font-weight: 700;
 }
 
 .day-card-head .today-flag {
