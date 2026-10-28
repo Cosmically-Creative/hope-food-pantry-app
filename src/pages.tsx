@@ -543,7 +543,24 @@ function PublicSchedule(props: {
       ) : (
         <WednesdayBoard config={props.config} event={props.event} now={props.now} />
       )}
+      <SignupDialog config={props.config} />
     </div>
+  );
+}
+
+function SignupDialog(props: { config: AppConfig }) {
+  return (
+    <>
+      <dialog id="signup-dialog" class="event-dialog" aria-labelledby="signup-dialog-label">
+        <div class="event-dialog-card signup-dialog-card">
+          <button type="button" class="event-dialog-close signup-dialog-close" data-signup-close aria-label="Close">
+            <img src={asset(props.config, '/img/icons/close.svg')} alt="" />
+          </button>
+          <div id="signup-dialog-body"></div>
+        </div>
+      </dialog>
+      <script src={asset(props.config, '/js/signup-dialog.js')} defer />
+    </>
   );
 }
 
@@ -622,7 +639,7 @@ function ShiftPane(props: { config: AppConfig; shift: PublicShift }) {
           <span>Not accepting more signups</span>
         </p>
       ) : (
-        <a class="btn-card" href={appPath(props.config, `/s/${shift.id}`)}>
+        <a class="btn-card" href={appPath(props.config, `/s/${shift.id}`)} data-signup={closed ? undefined : ''}>
           {action}
           <img src={asset(props.config, '/img/icons/right-arrow.svg')} alt="" />
         </a>
@@ -794,7 +811,7 @@ function CalendarShift(props: { config: AppConfig; shift: PublicShift }) {
   const closed = shift.full || shift.cancelled || shift.ended;
   const action = closed ? 'View shift' : 'Sign up';
   return (
-    <a class="cal-shift" href={appPath(props.config, `/s/${shift.id}`)}>
+    <a class="cal-shift" href={appPath(props.config, `/s/${shift.id}`)} data-signup={closed ? undefined : ''}>
       <span class="cal-line">
         {shift.when.startLabel} {shift.role}
       </span>

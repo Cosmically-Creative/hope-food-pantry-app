@@ -90,6 +90,9 @@ describe('public pages', () => {
     expect(html).not.toContain('<form');
     expect(html).toContain('src="/js/desk.js?v=');
     expect(html).toContain('src="/js/enhance.js?v=');
+    expect(html).toContain('src="/js/signup-dialog.js?v=');
+    expect(html).toContain('id="signup-dialog"');
+    expect(html).toContain('data-signup');
     expect(html).not.toContain('<script>alert(1)</script>');
     expect(html).toContain('href="/css/app.css?v=');
     expect(html).toContain('href="/brand/tokens.css?v=');
@@ -130,6 +133,7 @@ describe('public pages', () => {
     expect(calendar).toContain('Lane Wednesday');
     expect(calendar).toContain('View shift');
     expect(calendar).toContain(`href="/s/${ids.open}"`);
+    expect(calendar).toContain('data-signup=""');
     expect(calendar).not.toContain('secret.person@example.invalid');
     expect(calendar).not.toContain('SECRET-PERSON-NOTE');
     expect(calendar).not.toContain('November 2026');
@@ -261,6 +265,7 @@ describe('public pages', () => {
     expect(body.prefetch[0].eagerness).toBe('moderate');
     expect(body.prefetch[0].where.and[1].not.selector_matches).toContain('[data-confirm]');
     expect(body.prefetch[0].where.and[1].not.selector_matches).toContain('[data-open-event]');
+    expect(body.prefetch[0].where.and[1].not.selector_matches).toContain('[data-signup]');
   });
 
   it('prefixes routes and assets when the app is mounted at /volunteer', async () => {
@@ -452,6 +457,7 @@ describe('public pages', () => {
     const openPane = html.slice(html.lastIndexOf('<section class="shift-pane"', openStart), html.indexOf('</section>', openStart));
     expect(openPane).toContain('>Sign up');
     expect(openPane).toContain('href="/s/');
+    expect(openPane).toContain('data-signup=""');
   });
 
   it('shows an empty list when nothing is upcoming', async () => {

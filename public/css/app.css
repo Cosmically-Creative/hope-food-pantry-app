@@ -313,10 +313,10 @@ a.btn:active {
   align-items: center;
   gap: 28px;
   margin: 0;
-  padding: 4px 30px;
-  background: #fff;
-  border: 1px solid var(--hope-border-2);
-  border-radius: 50px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   box-shadow: none;
   font-size: 18px;
   line-height: 1;
@@ -1595,6 +1595,101 @@ article.shift-card {
 .event-dialog-close img {
   width: 1.15rem;
   height: 1.15rem;
+}
+
+html:has(#signup-dialog[open]) {
+  overflow: hidden;
+}
+
+#signup-dialog {
+  overflow: hidden;
+}
+
+.signup-dialog-card {
+  width: min(36rem, 100%);
+  max-height: calc(100dvh - 2rem);
+}
+
+.signup-dialog-close {
+  position: absolute;
+  top: 0.85rem;
+  right: 0.85rem;
+  z-index: 2;
+}
+
+#signup-dialog-body {
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 1.75rem;
+  max-height: inherit;
+  /* Keep the scrollbar off the curved corners. */
+  padding: 1.35rem 0.55rem 1.35rem 0;
+  background: var(--hope-blue-100);
+  box-shadow: var(--hope-shadow);
+}
+
+.signup-dialog-panel {
+  display: grid;
+  width: 100%;
+  max-height: calc(100dvh - 2rem - 2.7rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: transparent;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(34 34 34 / 0.45) transparent;
+}
+
+.signup-dialog-panel::-webkit-scrollbar {
+  width: 10px;
+}
+
+.signup-dialog-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.signup-dialog-panel::-webkit-scrollbar-thumb {
+  background: rgb(34 34 34 / 0.35);
+  border: 2px solid var(--hope-blue-100);
+  border-radius: 999px;
+}
+
+.signup-dialog-summary {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0 3.4rem 0.15rem 1.35rem;
+}
+
+.signup-dialog-title {
+  margin: 0;
+  font-size: 1.6rem;
+  overflow-wrap: anywhere;
+}
+
+.signup-dialog-summary .location,
+.signup-dialog-summary .when,
+.signup-dialog-summary .status,
+.signup-dialog-summary .spots {
+  margin: 0;
+}
+
+.signup-dialog-note {
+  margin: 0;
+  padding: 0.35rem 1.35rem 1.35rem;
+}
+
+.event-dialog .signup-dialog-panel .signup-form {
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  overflow: visible;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.event-dialog .signup-dialog-panel .signup-form h2 {
+  padding-right: 0;
+  font-size: 1.25rem;
 }
 
 .confirm-dialog {

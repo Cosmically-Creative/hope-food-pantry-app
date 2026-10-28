@@ -15,7 +15,7 @@ const ASSET_ROOTS = ['css', 'brand', 'img', 'js'];
 
 /**
  * Same-origin GET links are fetched on hover.
- * Confirm and new-event controls open a dialog instead of navigating.
+ * Confirm, new-event, and signup controls open a dialog instead of navigating.
  * Cross-origin links are not eligible unless a rule asks for them.
  */
 export const SPECULATION_RULES = {
@@ -25,7 +25,7 @@ export const SPECULATION_RULES = {
       where: {
         and: [
           { href_matches: '/*' },
-          { not: { selector_matches: '[data-confirm], [data-open-event]' } },
+          { not: { selector_matches: '[data-confirm], [data-open-event], [data-signup]' } },
         ],
       },
       eagerness: 'moderate',
