@@ -904,6 +904,9 @@ export function ShiftRoster(props: {
   const formError = props.shift.cancelled ? undefined : props.editError;
   const bannerError = props.error ?? (props.shift.cancelled ? props.editError : undefined);
   const detailLine = props.shift.cancelled ? 'Cancelled. The roster stays until you remove it.' : props.shift.whenLabel;
+  const walkInOpen = Boolean(
+    props.walkIn && (props.walkIn.message || Object.values(props.walkIn.errors).some((message) => Boolean(message))),
+  );
   return (
     <div class="event-page">
       <Crumb
@@ -949,10 +952,10 @@ export function ShiftRoster(props: {
           </details>
         )}
       </section>
-      <section class="desk-events" aria-labelledby="roster-heading">
+      <section class="desk-events" aria-labelledby="volunteers-heading">
         <div class="desk-toolbar">
           <div class="desk-toolbar-copy">
-            <h2 id="roster-heading">Roster</h2>
+            <h2 id="volunteers-heading">Volunteers</h2>
           </div>
           {cancelledPeople.length > 0 ? (
             <div class="desk-actions pick-bar">
@@ -982,21 +985,25 @@ export function ShiftRoster(props: {
         ) : (
           <Roster config={props.config} csrf={props.csrf} people={props.shift.people} moves={props.moves} />
         )}
+        {props.walkIn ? (
+          <details class="walkin-menu" open={walkInOpen ? true : undefined}>
+            <summary>
+              Add a walk-in
+              <span class="edit-chevron" aria-hidden="true" />
+            </summary>
+            <WalkInForm
+              config={props.config}
+              csrf={props.csrf}
+              shiftId={props.shift.id}
+              spotsLeft={Math.max(0, props.shift.capacity - props.shift.occupied)}
+              form={props.walkIn}
+              contacts={props.contacts ?? []}
+            />
+          </details>
+        ) : props.walkInNote ? (
+          <p class="panel-note">{props.walkInNote}</p>
+        ) : null}
       </section>
-      {props.walkIn ? (
-        <section class="desk-events" aria-labelledby="walkin-heading">
-          <WalkInForm
-            config={props.config}
-            csrf={props.csrf}
-            shiftId={props.shift.id}
-            spotsLeft={Math.max(0, props.shift.capacity - props.shift.occupied)}
-            form={props.walkIn}
-            contacts={props.contacts ?? []}
-          />
-        </section>
-      ) : props.walkInNote ? (
-        <p class="panel-note">{props.walkInNote}</p>
-      ) : null}
       <div class="desk-actions">
         {props.shift.cancelled ? null : (
           <ConfirmAnchor
@@ -1665,7 +1672,6 @@ function WalkInForm(props: {
   const contactId = props.form.contactId ?? '';
   return (
     <form method="post" action={appPath(props.config, `/admin/shifts/${props.shiftId}/walk-in`)} class="signup-form event-details-form">
-      <h2 id="walkin-heading">Add a walk-in</h2>
       <p>Choose how many people are here, including the person named below. This signup holds that many spots and queues one confirmation email. Another person can use the same email. The name is listed on the public sign-up page when this shift is posted there. Email and notes stay off that page.</p>
       {props.form.message ? <p class="error">{props.form.message}</p> : null}
       {errorEntries.length > 0 ? (

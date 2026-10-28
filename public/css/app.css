@@ -2321,6 +2321,33 @@ button.btn-quiet::before {
   justify-content: flex-end;
 }
 
+/* The remove control sits in the heading row. Its height stays within that line so showing it does not push the list down. */
+.desk-events > .desk-toolbar {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.desk-events > .desk-toolbar .desk-toolbar-copy {
+  min-width: 0;
+}
+
+.desk-events > .desk-toolbar .pick-bar {
+  flex: none;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  margin-top: 0;
+}
+
+.desk-events > .desk-toolbar .pick-bar .btn {
+  min-height: 2.2rem;
+  padding: 0.2rem 0.9rem;
+  font-size: 0.92rem;
+  line-height: 1.2;
+  width: auto;
+  flex: 0 0 auto;
+}
+
 .pick,
 .pick-all {
   display: inline-flex;
@@ -2474,6 +2501,47 @@ button.btn-quiet::before {
   background: transparent;
   border-radius: 0;
   box-shadow: none;
+}
+
+.walkin-menu {
+  margin: 0;
+}
+
+.walkin-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: fit-content;
+  min-height: 2.35rem;
+  padding: 0.28rem 0.9rem;
+  list-style: none;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #d5dee6;
+  border-radius: 999px;
+  color: var(--hope-ink);
+  font-size: 0.92rem;
+  font-weight: 650;
+}
+
+.walkin-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.walkin-menu > summary::marker {
+  content: "";
+}
+
+.walkin-menu:not([open]) > :not(summary) {
+  display: none;
+}
+
+.walkin-menu[open] .edit-chevron {
+  transform: translateY(0.08rem) rotate(225deg);
+}
+
+.walkin-menu > .signup-form {
+  margin-top: 0.85rem;
 }
 
 .event-remove {
