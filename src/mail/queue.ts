@@ -1,6 +1,16 @@
 import type Database from 'better-sqlite3';
 import { absoluteUrl } from '../url.js';
-import { renderCancellation, renderChanged, renderConfirmation, renderMagicLink, renderMoved, renderSwitched, type MailShift } from './templates.js';
+import {
+  renderCancellation,
+  renderChanged,
+  renderConfirmation,
+  renderCoordinatorNotice,
+  renderMagicLink,
+  renderMoved,
+  renderSwitched,
+  type CoordinatorNoticeAction,
+  type MailShift,
+} from './templates.js';
 import type { MailIdentity } from './types.js';
 
 export type QueuedSignup = {
@@ -52,6 +62,74 @@ export function queueChanged(db: Database.Database, input: QueuedSignup, reason:
     if (reason === 'switch') return renderSwitched(letter);
     return renderChanged(letter);
   });
+}
+
+/**
+ * One roster notice per active coordinator.
+ * The private signup link is not included. The same signup and change does not add a second row.
+ */
+export function queueCoordinatorNotices(
+  db: Database.Database,
+  input: {
+    action: CoordinatorNoticeAction;
+    signupId: number;
+    shiftId: number;
+    shiftVersion: number;
+    volunteerName: string;
+    volunteerEmail: string;
+    groupSize?: number;
+    shift: MailShift;
+    fromShift?: MailShift;
+    mail: MailIdentity;
+    now: string;
+  },
+): void {
+  const coordinators = db
+    .prepare(
+      `SELECT name AS name, email AS email
+       FROM coordinators
+       WHERE active = 1
+       ORDER BY id`,
+    )
+    .all() as { name: string; email: string }[];
+  if (coordinators.length === 0) return;
+  const phoneRow = db.prepare('SELECT phone AS phone FROM signups WHERE id = ?').get(input.signupId) as
+    | { phone: string | null }
+    | undefined;
+  const rosterUrl = absoluteUrl(input.mail, `/admin/shifts/${input.shiftId}`);
+  const insert = db.prepare(
+    `INSERT INTO outbox (
+       dedupe_key, signup_id, shift_id, kind, to_email, subject, body_text, body_html,
+       headers_json, send_after, attempts, status, created_at
+     ) VALUES (?, ?, ?, 'notice', ?, ?, ?, ?, ?, ?, 0, 'pending', ?)
+     ON CONFLICT (dedupe_key) DO NOTHING`,
+  );
+  for (const coordinator of coordinators) {
+    const rendered = renderCoordinatorNotice({
+      coordinatorName: coordinator.name,
+      volunteerName: input.volunteerName,
+      volunteerEmail: input.volunteerEmail,
+      phone: phoneRow?.phone ?? null,
+      groupSize: input.groupSize,
+      action: input.action,
+      shift: input.shift,
+      fromShift: input.fromShift,
+      rosterUrl,
+      replyTo: input.mail.replyTo,
+    });
+    insert.run(
+      `notice:${input.action}:v${input.shiftVersion}:${input.signupId}:${coordinator.email}`,
+      input.signupId,
+      input.shiftId,
+      coordinator.email,
+      rendered.subject,
+      rendered.text,
+      rendered.html,
+      JSON.stringify({ From: input.mail.from, 'Reply-To': input.mail.replyTo }),
+      input.now,
+      input.now,
+    );
+  }
 }
 
 export function queueMagicLink(

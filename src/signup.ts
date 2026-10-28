@@ -3,7 +3,7 @@ import { Temporal } from '@js-temporal/polyfill';
 import type Database from 'better-sqlite3';
 import { rememberSignupContact } from './contacts.js';
 import { normalizeEmail } from './email.js';
-import { queueCancellation, queueConfirmation, cancelPendingConfirmations, cancelPendingReminders } from './mail/queue.js';
+import { queueCancellation, queueConfirmation, queueCoordinatorNotices, cancelPendingConfirmations, cancelPendingReminders } from './mail/queue.js';
 import type { MailIdentity } from './mail/types.js';
 import { MAX_PARTY_SIZE } from './signup-form.js';
 import { isWithinSignupWindow } from './signup-window.js';
@@ -229,15 +229,28 @@ function placeReservation(db: Database.Database, input: ReserveInput, emailNorm:
       operationKey,
     );
   const signupId = Number(inserted.lastInsertRowid);
+  const facts = shiftFacts(shift);
   queueConfirmation(db, {
     signupId,
     shiftId: input.shiftId,
-    shiftVersion: shift.version,
+    shiftVersion: facts.version,
     token: manageToken,
     volunteerName: input.name,
     volunteerEmail: emailNorm,
     groupSize,
-    shift: shiftFacts(shift).facts,
+    shift: facts.facts,
+    mail: input.mail,
+    now: input.now,
+  });
+  queueCoordinatorNotices(db, {
+    action: 'signup',
+    signupId,
+    shiftId: input.shiftId,
+    shiftVersion: facts.version,
+    volunteerName: input.name,
+    volunteerEmail: emailNorm,
+    groupSize,
+    shift: facts.facts,
     mail: input.mail,
     now: input.now,
   });
@@ -324,6 +337,18 @@ function cancelConfirmed(db: Database.Database, hash: string, token: string, now
         shiftId: row.shift_id,
         shiftVersion: shift.version,
         token,
+        volunteerName: row.name,
+        volunteerEmail: row.email_norm,
+        groupSize: Number(row.group_size),
+        shift: shift.facts,
+        mail,
+        now,
+      });
+      queueCoordinatorNotices(db, {
+        action: 'cancel',
+        signupId: row.id,
+        shiftId: row.shift_id,
+        shiftVersion: shift.version,
         volunteerName: row.name,
         volunteerEmail: row.email_norm,
         groupSize: Number(row.group_size),

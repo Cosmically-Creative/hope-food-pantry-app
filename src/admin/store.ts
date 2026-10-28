@@ -3,7 +3,7 @@ import { Temporal } from '@js-temporal/polyfill';
 import type Database from 'better-sqlite3';
 import type { EventInput, ShiftInput, TemplateInput } from './forms.js';
 import { writeAudit } from '../auth/audit.js';
-import { cancelPendingConfirmations, cancelPendingReminders, queueCancellation, queueChanged } from '../mail/queue.js';
+import { cancelPendingConfirmations, cancelPendingReminders, queueCancellation, queueChanged, queueCoordinatorNotices } from '../mail/queue.js';
 import type { MailShift } from '../mail/templates.js';
 import type { MailIdentity } from '../mail/types.js';
 import { confirmedPersonOnShift, confirmedPersonShiftIds, reserveSignup, type ReserveInput, type ReserveResult } from '../signup.js';
@@ -1265,6 +1265,20 @@ function relocate(
     },
     options.audience === 'volunteer' ? 'switch' : 'move',
   );
+  const previous = mailShift(db, source.shift_id);
+  queueCoordinatorNotices(db, {
+    action: options.audience === 'volunteer' ? 'switch' : 'move',
+    signupId: newSignupId,
+    shiftId: destination.id,
+    shiftVersion: shift.version,
+    volunteerName: source.name,
+    volunteerEmail: source.email_norm,
+    groupSize,
+    shift: shift.facts,
+    fromShift: previous?.facts,
+    mail,
+    now,
+  });
   writeAudit(db, options.coordinatorId, options.action, {
     signupId: source.id,
     fromShiftId: source.shift_id,
@@ -1418,6 +1432,18 @@ function bumpAndNotify(db: Database.Database, shiftId: number, now: string, mail
       mail,
       now,
     });
+    queueCoordinatorNotices(db, {
+      action: 'change',
+      signupId: person.id,
+      shiftId: person.shift_id,
+      shiftVersion: shift.version,
+      volunteerName: person.name,
+      volunteerEmail: person.email_norm,
+      groupSize: Number(person.group_size),
+      shift: shift.facts,
+      mail,
+      now,
+    });
     mailed += 1;
   }
   return mailed;
@@ -1464,6 +1490,18 @@ function cancelConfirmedPerson(db: Database.Database, person: PersonRow, now: st
     mail,
     now,
     linkNote: REPLACED_LINK,
+  });
+  queueCoordinatorNotices(db, {
+    action: 'cancel',
+    signupId: person.id,
+    shiftId: person.shift_id,
+    shiftVersion: shift.version,
+    volunteerName: person.name,
+    volunteerEmail: person.email_norm,
+    groupSize: Number(person.group_size),
+    shift: shift.facts,
+    mail,
+    now,
   });
   return issued.token;
 }
@@ -1524,7 +1562,7 @@ function mailShift(db: Database.Database, shiftId: number): { version: number; e
 function loadPerson(db: Database.Database, signupId: number): PersonRow | null {
   const row = db
     .prepare(
-      `SELECT id, name, email_norm, shift_id, status
+      `SELECT id, name, email_norm, shift_id, status, group_size
        FROM signups
        WHERE id = ? AND anonymized_at IS NULL`,
     )

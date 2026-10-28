@@ -92,6 +92,11 @@ export function deactivateAdmin(
        SET status = 'cancelled', last_error = ?
        WHERE kind = 'magic_link' AND status = 'pending' AND to_email = ?`,
     ).run('An administrator removed this sign-in link.', admin.email);
+    db.prepare(
+      `UPDATE outbox
+       SET status = 'cancelled', last_error = ?
+       WHERE kind = 'notice' AND status = 'pending' AND to_email = ?`,
+    ).run('That coordinator no longer has access.', admin.email);
     writeAudit(db, actorId, 'admins.remove', { coordinatorId: id }, now);
     return { ok: true as const };
   }).immediate();

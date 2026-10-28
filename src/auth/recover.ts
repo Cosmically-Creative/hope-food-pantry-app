@@ -19,6 +19,11 @@ export function recoverCoordinator(
       const taken = db.prepare('SELECT id AS id FROM coordinators WHERE email = ?').get(next);
       if (taken) throw new Error('Another coordinator already uses the new address.');
       db.prepare('UPDATE coordinators SET email = ? WHERE id = ?').run(next, row.id);
+      db.prepare(
+        `UPDATE outbox
+         SET status = 'cancelled', last_error = ?
+         WHERE kind = 'notice' AND status = 'pending' AND to_email = ?`,
+      ).run('That coordinator no longer has access.', email);
     }
     db.prepare('DELETE FROM sessions WHERE coordinator_id = ?').run(row.id);
     db.prepare('UPDATE login_tokens SET used_at = ? WHERE coordinator_id = ? AND used_at IS NULL').run(input.now, row.id);

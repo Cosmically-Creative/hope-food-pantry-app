@@ -242,6 +242,70 @@ describe('signup and shift constraints', () => {
     }
   });
 
+  it('keeps queued mail when coordinator notices are added', async () => {
+    const root = makeDir();
+    const migrations = path.join(root, 'migrations');
+    const dataDir = path.join(root, 'data');
+    mkdirSync(migrations);
+    const real = defaultMigrationsDir();
+    for (const name of readdirSync(real)) {
+      if (name.startsWith('009')) continue;
+      copyFileSync(path.join(real, name), path.join(migrations, name));
+    }
+    const config = loadConfig(devEnv({ DATA_DIR: dataDir }));
+    const first = await openAppDatabase(config, { migrationsDir: migrations });
+    const parents = insertParents(first);
+    insertSignup(first, parents.shiftId, { email: 'ada@example.invalid', emailNorm: 'ada@example.invalid' });
+    const signupId = Number((first.prepare('SELECT id AS id FROM signups').get() as { id: number }).id);
+    const outboxId = Number(
+      first
+        .prepare(
+          `INSERT INTO outbox (
+             dedupe_key, signup_id, shift_id, kind, to_email, subject, body_text, body_html, send_after, status, created_at
+           ) VALUES ('keep', ?, ?, 'confirmation', 'ada@example.invalid', 'Hi', 'Hi', '<p>Hi</p>', ?, 'pending', ?)`,
+        )
+        .run(signupId, parents.shiftId, INSTANT, INSTANT).lastInsertRowid,
+    );
+    first
+      .prepare(
+        `INSERT INTO reminders_sent (signup_id, kind, shift_version, outbox_id, queued_at)
+         VALUES (?, '48h', 1, ?, ?)`,
+      )
+      .run(signupId, outboxId, INSTANT);
+    first.close();
+
+    copyFileSync(path.join(real, '009_coordinator_notice.sql'), path.join(migrations, '009_coordinator_notice.sql'));
+    const second = await openAppDatabase(config, { migrationsDir: migrations });
+    try {
+      expect(second.pragma('foreign_keys', { simple: true })).toBe(1);
+      expect(second.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      expect(second.prepare('SELECT to_email AS to_email, kind AS kind FROM outbox WHERE dedupe_key = ?').get('keep')).toEqual({
+        to_email: 'ada@example.invalid',
+        kind: 'confirmation',
+      });
+      expect(second.prepare('SELECT outbox_id AS outbox_id FROM reminders_sent').get()).toEqual({ outbox_id: outboxId });
+      second
+        .prepare(
+          `INSERT INTO outbox (
+             dedupe_key, signup_id, shift_id, kind, to_email, subject, body_text, body_html, send_after, status, created_at
+           ) VALUES ('notice', ?, ?, 'notice', 'coordinator@example.invalid', 'Hi', 'Hi', '<p>Hi</p>', ?, 'pending', ?)`,
+        )
+        .run(signupId, parents.shiftId, INSTANT, INSTANT);
+      expect(() =>
+        second
+          .prepare(
+            `INSERT INTO outbox (
+               dedupe_key, signup_id, shift_id, kind, to_email, subject, body_text, body_html, send_after, status, created_at
+             ) VALUES ('nope', ?, ?, 'nope', 'ada@example.invalid', 'Hi', 'Hi', '<p>Hi</p>', ?, 'pending', ?)`,
+          )
+          .run(signupId, parents.shiftId, INSTANT, INSTANT),
+      ).toThrow(/CHECK/);
+      expect(second.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'outbox_next'").get()).toBeUndefined();
+    } finally {
+      second.close();
+    }
+  });
+
   it('enforces capacity, party size, duplicates, anonymization, and history', async () => {
     const dataDir = path.join(makeDir(), 'data');
     const db = await openAppDatabase(loadConfig(devEnv({ DATA_DIR: dataDir })));

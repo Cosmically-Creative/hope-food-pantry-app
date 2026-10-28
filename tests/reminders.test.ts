@@ -116,7 +116,8 @@ describe('reminder mail', () => {
     queueDueReminders(db, MAIL, SECRET, NOW);
     db.prepare(`UPDATE signups SET reminders_off = 1 WHERE email_norm = 'pat.review@example.invalid'`).run();
     const mailer: Mailer = { async send() { return { result: 'sent', providerId: null }; } };
-    expect(await deliverDueMail(db, mailer, NOW)).toBe(1);
+    expect(await deliverDueMail(db, mailer, NOW)).toBe(2);
+    expect(db.prepare(`SELECT status FROM outbox WHERE kind = 'notice'`).get()).toEqual({ status: 'sent' });
     expect(db.prepare(`SELECT status, last_error FROM outbox WHERE kind = 'reminder'`).get()).toEqual({
       status: 'cancelled',
       last_error: 'Reminders were turned off before this message was sent.',

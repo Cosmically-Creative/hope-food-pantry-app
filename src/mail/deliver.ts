@@ -22,7 +22,7 @@ type ClaimedRow = {
 };
 
 /**
- * Claims due confirmation, change, cancellation, reminder, and sign-in mail, then sends outside the database transaction.
+ * Claims due confirmation, change, cancellation, reminder, sign-in, and coordinator notice mail, then sends outside the database transaction.
  * An expired sending lease becomes delivery_unknown and is not sent again.
  * sent_at means the provider accepted the message.
  */
@@ -72,7 +72,7 @@ function claimNext(db: Database.Database, now: string): ClaimedRow | null {
       .prepare(
         `SELECT id AS id
          FROM outbox
-         WHERE status = 'pending' AND send_after <= ? AND kind IN ('confirmation', 'cancelled', 'changed', 'reminder', 'magic_link')
+         WHERE status = 'pending' AND send_after <= ? AND kind IN ('confirmation', 'cancelled', 'changed', 'reminder', 'magic_link', 'notice')
          ORDER BY id
          LIMIT 1`,
       )
@@ -97,6 +97,7 @@ function claimNext(db: Database.Database, now: string): ClaimedRow | null {
 
 function obsoleteReason(db: Database.Database, row: ClaimedRow, now: string): string | null {
   if (row.kind === 'magic_link') return magicLinkReason(db, row, now);
+  if (row.kind === 'notice') return noticeReason(db, row);
   if (row.signup_id === null) return 'The signup is no longer available.';
   const signup = db
     .prepare(
@@ -131,6 +132,17 @@ function obsoleteReason(db: Database.Database, row: ClaimedRow, now: string): st
     }
   }
   if (row.kind === 'cancelled' && signup.status !== 'cancelled') return 'The signup is not cancelled.';
+  return null;
+}
+
+function noticeReason(db: Database.Database, row: ClaimedRow): string | null {
+  if (row.signup_id === null) return 'The signup is no longer available.';
+  const signup = db.prepare('SELECT anonymized_at AS anonymized_at FROM signups WHERE id = ?').get(row.signup_id) as
+    | { anonymized_at: string | null }
+    | undefined;
+  if (!signup || signup.anonymized_at) return 'The signup is no longer available.';
+  const coordinator = db.prepare('SELECT id AS id FROM coordinators WHERE email = ? AND active = 1').get(row.to_email);
+  if (!coordinator) return 'That coordinator no longer has access.';
   return null;
 }
 

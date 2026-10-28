@@ -165,6 +165,66 @@ export function renderReminder(input: {
   return { subject, text: lines.join('\n'), html };
 }
 
+export type CoordinatorNoticeAction = 'signup' | 'cancel' | 'switch' | 'move' | 'change';
+
+/** A roster notice for coordinators. It names the person and links to the shift. It does not include the private signup link. */
+export function renderCoordinatorNotice(input: {
+  coordinatorName: string;
+  volunteerName: string;
+  volunteerEmail: string;
+  phone: string | null;
+  groupSize?: number;
+  action: CoordinatorNoticeAction;
+  shift: MailShift;
+  fromShift?: MailShift;
+  rosterUrl: string;
+  replyTo: string;
+}): RenderedMail {
+  const copy = noticeCopy(input);
+  const greeting = `Hello ${singleLine(input.coordinatorName)},`;
+  const phone = input.phone ? singleLine(input.phone) : '';
+  const contact = [singleLine(input.volunteerName), singleLine(input.volunteerEmail), ...(phone ? [phone] : [])];
+  const when = input.shift.whenLabel;
+  const place = input.shift.location.trim();
+  const lines = [
+    greeting,
+    '',
+    copy.hello,
+    '',
+    ...contact,
+    '',
+    input.shift.eventTitle,
+    when,
+    ...(place ? [place] : []),
+    '',
+    'Open this shift:',
+    input.rosterUrl,
+    '',
+    'That page lists the roster. Sign in if you are not already.',
+    `Replies go to ${input.replyTo}.`,
+    '',
+    'Hope Food Pantry',
+  ];
+  const htmlPlace = place ? `<br>${escapeHtml(place)}` : '';
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(copy.subject)}</title>
+</head>
+<body style="margin:0;padding:24px;background:#f4fafd;color:#222;font-family:sans-serif;line-height:1.5">
+<p>${escapeHtml(greeting)}</p>
+<p>${escapeHtml(copy.hello)}</p>
+<p>${contact.map((line) => escapeHtml(line)).join('<br>')}</p>
+<p>${escapeHtml(input.shift.eventTitle)}<br>${escapeHtml(when)}${htmlPlace}</p>
+<p><a href="${escapeHtml(input.rosterUrl)}" style="color:#222">Open this shift</a></p>
+<p>That page lists the roster. Sign in if you are not already. Replies go to ${escapeHtml(input.replyTo)}.</p>
+<p>Hope Food Pantry</p>
+</body>
+</html>`;
+  return { subject: copy.subject, text: lines.join('\n'), html };
+}
+
 export function renderMagicLink(input: { signInUrl: string; replyTo: string }): RenderedMail {
   const subject = 'Sign in to Hope Volunteer';
   const hello = 'Use this link to sign in. It expires in 15 minutes and works once.';
@@ -185,6 +245,44 @@ export function renderMagicLink(input: { signInUrl: string; replyTo: string }): 
 </body>
 </html>`;
   return { subject, text, html };
+}
+
+function noticeCopy(input: {
+  volunteerName: string;
+  groupSize?: number;
+  action: CoordinatorNoticeAction;
+  shift: MailShift;
+  fromShift?: MailShift;
+}): { subject: string; hello: string } {
+  const name = singleLine(input.volunteerName);
+  const role = singleLine(input.shift.role);
+  const party = partyNote(input.groupSize);
+  const from = input.fromShift
+    ? ` from ${singleLine(input.fromShift.role)} (${singleLine(input.fromShift.whenLabel)})`
+    : '';
+  if (input.action === 'signup') {
+    return { subject: `${name} signed up for ${role}`, hello: `${name} signed up for ${role}.${party}` };
+  }
+  if (input.action === 'cancel') {
+    const spots =
+      input.groupSize && input.groupSize > 1
+        ? `The ${input.groupSize} spots this signup held are open for someone else.`
+        : 'The spot is open for someone else.';
+    return {
+      subject: `${name}'s signup for ${role} was cancelled`,
+      hello: `${name}'s signup for ${role} is cancelled. ${spots}`,
+    };
+  }
+  if (input.action === 'switch') {
+    return { subject: `${name} switched to ${role}`, hello: `${name} switched${from} to ${role}.${party}` };
+  }
+  if (input.action === 'move') {
+    return { subject: `${name} was moved to ${role}`, hello: `${name} was moved${from} to ${role}.${party}` };
+  }
+  return {
+    subject: `${name}'s ${role} shift changed`,
+    hello: `The time or place for ${name}'s ${role} shift has changed.${party}`,
+  };
 }
 
 function partyNote(groupSize: number | undefined): string {
