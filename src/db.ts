@@ -123,18 +123,28 @@ export async function applyMigrations(
   }
   const applied: string[] = [];
   for (const file of pending) {
+    const relaxForeignKeys = file.sql.split('\n').some((line) => line.trim() === '-- foreign-keys: off');
     const apply = db.transaction(() => {
       db.exec(file.sql);
+      if (relaxForeignKeys) {
+        const broken = db.pragma('foreign_key_check');
+        if (Array.isArray(broken) && broken.length > 0) {
+          throw new Error('foreign key check failed');
+        }
+      }
       db.prepare('INSERT INTO schema_migrations (name, checksum, applied_at) VALUES (?, ?, ?)').run(
         file.name,
         file.checksum,
         options.now ?? nowUtc(),
       );
     });
+    if (relaxForeignKeys) db.pragma('foreign_keys = OFF');
     try {
       apply();
     } catch (err) {
       throw new MigrationError(`Startup aborted. Migration ${file.name} failed: ${messageOf(err)}`);
+    } finally {
+      if (relaxForeignKeys) db.pragma('foreign_keys = ON');
     }
     applied.push(file.name);
   }

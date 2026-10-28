@@ -10,6 +10,7 @@ export type QueuedSignup = {
   token: string;
   volunteerName: string;
   volunteerEmail: string;
+  groupSize?: number;
   shift: MailShift;
   mail: MailIdentity;
   now: string;
@@ -23,6 +24,7 @@ export function queueConfirmation(db: Database.Database, input: QueuedSignup): v
     shift: input.shift,
     manageUrl: manageUrl(input),
     replyTo: input.mail.replyTo,
+    groupSize: input.groupSize,
   }));
 }
 
@@ -33,6 +35,7 @@ export function queueCancellation(db: Database.Database, input: QueuedSignup): v
     manageUrl: manageUrl(input),
     replyTo: input.mail.replyTo,
     linkNote: input.linkNote,
+    groupSize: input.groupSize,
   }));
 }
 
@@ -43,6 +46,7 @@ export function queueChanged(db: Database.Database, input: QueuedSignup, reason:
       shift: input.shift,
       manageUrl: manageUrl(input),
       replyTo: input.mail.replyTo,
+      groupSize: input.groupSize,
     };
     if (reason === 'move') return renderMoved(letter);
     if (reason === 'switch') return renderSwitched(letter);

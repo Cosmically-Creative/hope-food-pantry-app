@@ -6,6 +6,9 @@ const NAME_MAX = 80;
 const PHONE_MAX = 40;
 const NOTES_MAX = 500;
 
+/** One signup can hold this many spots. The database check uses the same bound. */
+export const MAX_PARTY_SIZE = 20;
+
 export type SignupValues = {
   name: string;
   firstName: string;
@@ -13,10 +16,11 @@ export type SignupValues = {
   email: string;
   phone: string;
   notes: string;
+  partySize: string;
 };
 
 export type SignupErrors = Partial<
-  Record<'name' | 'firstName' | 'lastName' | 'email' | 'phone' | 'notes' | 'form', string>
+  Record<'name' | 'firstName' | 'lastName' | 'email' | 'phone' | 'notes' | 'partySize' | 'form', string>
 >;
 
 export type SignupDraft = {
@@ -25,6 +29,7 @@ export type SignupDraft = {
   emailNorm: string;
   phone: string;
   notes: string | null;
+  groupSize: number;
 };
 
 export const EMPTY_SIGNUP: SignupValues = {
@@ -34,7 +39,23 @@ export const EMPTY_SIGNUP: SignupValues = {
   email: '',
   phone: '',
   notes: '',
+  partySize: '1',
 };
+
+/** Choices for the people control. Never offers more than the spots still open, or more than the stored maximum. */
+export function partyChoices(remaining: number): number[] {
+  const room = Math.max(0, Math.floor(remaining));
+  const cap = Math.min(MAX_PARTY_SIZE, room);
+  return Array.from({ length: cap }, (_, index) => index + 1);
+}
+
+export function partyChoiceLabel(count: number): string {
+  return count === 1 ? '1 person' : `${count} people`;
+}
+
+export function spotsLeftMessage(remaining: number): string {
+  return remaining === 1 ? 'This shift has 1 spot left.' : `This shift has ${remaining} spots left.`;
+}
 
 const controlChars = /[\u0000-\u001F\u007F]/;
 
@@ -59,6 +80,7 @@ export function parseSignupForm(
       email: z.string(),
       phone: z.string(),
       notes: z.string(),
+      partySize: z.string(),
     })
     .safeParse(input);
   if (!parsed.success) return { ok: false, errors: { form: 'Check the signup fields and try again.' } };
@@ -99,7 +121,12 @@ export function parseSignupForm(
   if (notes.length > NOTES_MAX) errors.notes = `Use ${NOTES_MAX} characters or fewer.`;
   else if (controlChars.test(notes)) errors.notes = 'Enter notes without control characters.';
 
-  if (Object.keys(errors).length > 0 || emailNorm.length === 0 || phone.length === 0) return { ok: false, errors };
+  const party = readPartySize(parsed.data.partySize, voice);
+  if (party.error) errors.partySize = party.error;
+
+  if (Object.keys(errors).length > 0 || emailNorm.length === 0 || phone.length === 0 || party.error) {
+    return { ok: false, errors };
+  }
   return {
     ok: true,
     draft: {
@@ -108,6 +135,19 @@ export function parseSignupForm(
       emailNorm,
       phone,
       notes: notes.length === 0 ? null : notes,
+      groupSize: party.value,
     },
   };
+}
+
+function readPartySize(raw: string, voice: 'volunteer' | 'coordinator'): { value: number; error?: string } {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return { value: 1 };
+  const label = voice === 'coordinator' ? 'Choose how many people are here.' : 'Choose how many people are coming.';
+  if (!/^[1-9]\d*$/.test(trimmed)) return { value: 1, error: label };
+  const value = Number(trimmed);
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_PARTY_SIZE) {
+    return { value: 1, error: `Choose ${MAX_PARTY_SIZE} people or fewer.` };
+  }
+  return { value };
 }

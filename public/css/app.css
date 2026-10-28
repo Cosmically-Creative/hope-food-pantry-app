@@ -37,6 +37,10 @@
   --hope-open-edge: #c5d7b4;
   --hope-full: #f6e2de;
   --hope-full-edge: #e4c4be;
+  --hope-scrollbar-size: 14px;
+  --hope-scrollbar-thumb: var(--hope-gold);
+  --hope-scrollbar-thumb-hover: color-mix(in srgb, var(--hope-gold) 72%, var(--hope-ink));
+  --hope-scrollbar-track: color-mix(in srgb, var(--hope-border) 48%, var(--hope-blue-100));
 }
 
 *,
@@ -57,6 +61,49 @@ html {
 html,
 body {
   overflow-x: hidden;
+}
+
+/* Gold pill on a soft track, the same family as the buttons. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--hope-scrollbar-thumb) var(--hope-scrollbar-track);
+}
+
+@supports selector(::-webkit-scrollbar) {
+  html {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+
+  *::-webkit-scrollbar {
+    width: var(--hope-scrollbar-size);
+    height: var(--hope-scrollbar-size);
+  }
+
+  *::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: var(--hope-scrollbar-track);
+    border-radius: 999px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: var(--hope-yellow);
+    border: 2px solid var(--hope-gold);
+    border-radius: 999px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--hope-yellow-hover);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
 
 body {
@@ -939,7 +986,7 @@ main a:hover {
 }
 
 .cal-day.is-today .cal-line {
-  background: var(--hope-gold);
+  background: rgb(255 255 255 / 0.45);
 }
 
 .cal-hold {
@@ -1629,28 +1676,30 @@ html:has(#signup-dialog[open]) {
 }
 
 .signup-dialog-panel {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-height: calc(100dvh - 2rem - 2.7rem);
+  overflow: hidden;
+  background: transparent;
+}
+
+.signup-dialog-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  background: transparent;
-  scrollbar-width: thin;
-  scrollbar-color: rgb(34 34 34 / 0.45) transparent;
 }
 
-.signup-dialog-panel::-webkit-scrollbar {
-  width: 10px;
+.signup-dialog-scroll::-webkit-scrollbar-track,
+.event-dialog .signup-form::-webkit-scrollbar-track {
+  margin-top: 0.45rem;
+  margin-bottom: 0.85rem;
 }
 
-.signup-dialog-panel::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.signup-dialog-panel::-webkit-scrollbar-thumb {
-  background: rgb(34 34 34 / 0.35);
-  border: 2px solid var(--hope-blue-100);
-  border-radius: 999px;
+/* The new-event form scrolls as one piece, with the close control over its corner. */
+.event-dialog .signup-form::-webkit-scrollbar-track {
+  margin-top: 3.55rem;
 }
 
 .signup-dialog-summary {

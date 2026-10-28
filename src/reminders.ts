@@ -22,6 +22,7 @@ type DueSignup = {
   location: string;
   tz: string;
   shift_id: number;
+  group_size: number;
 };
 
 /**
@@ -37,7 +38,7 @@ export function queueDueReminders(db: Database.Database, mail: MailIdentity, sec
     const activeMail = { ...mail, replyTo: readReplyTo(db, mail.replyTo) };
     const rows = db
       .prepare(
-        `SELECT su.id AS id, su.name AS name, su.email_norm AS email_norm,
+        `SELECT su.id AS id, su.name AS name, su.email_norm AS email_norm, su.group_size AS group_size,
                 su.shift_id AS shift_id, s.version AS version, s.starts_at_utc AS starts_at_utc,
                 s.ends_at_utc AS ends_at_utc, s.role AS role,
                 e.title AS title, e.location AS location, e.tz AS tz
@@ -156,6 +157,7 @@ function insertOutbox(
         shift: shiftFacts(row),
         unsubscribeUrl,
         replyTo: mail.replyTo,
+        groupSize: Number(row.group_size),
       })
     : { subject: 'Reminder not sent', text: 'This reminder was not sent.', html: '<p>This reminder was not sent.</p>' };
   const saved = db

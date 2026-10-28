@@ -108,7 +108,7 @@ import {
 } from './settings.js';
 import { expandTemplates } from './recurrence.js';
 import { Layout } from './pages.js';
-import { EMPTY_SIGNUP, parseSignupForm, type SignupValues } from './signup-form.js';
+import { EMPTY_SIGNUP, parseSignupForm, spotsLeftMessage, type SignupValues } from './signup-form.js';
 import { confirmedPersonOnShift } from './signup.js';
 import { recordInvalidLoginToken, recordLoginEmail, recordLoginIp } from './rate-limit.js';
 import { isBusy } from './sqlite-error.js';
@@ -562,6 +562,7 @@ async function submitAddContactToShift(c: Context, services: AdminServices): Pro
       email: parsed.draft.emailNorm,
       phone: parsed.draft.phone,
       notes: parsed.draft.notes,
+      groupSize: parsed.draft.groupSize,
       operationId: token.claims.operationId,
       now: services.now(),
       mail: mailIdentity(services.db, services.config),
@@ -1308,13 +1309,27 @@ async function submitWalkIn(c: Context, services: AdminServices): Promise<Respon
       email: parsed.draft.emailNorm,
       phone: parsed.draft.phone,
       notes: parsed.draft.notes,
+      groupSize: parsed.draft.groupSize,
       operationId: token.claims.operationId,
       now: services.now(),
       mail: mailIdentity(services.db, services.config),
     });
     if (saved.ok) return c.redirect(appPath(services.config, `/admin/shifts/${id}?notice=walk-in`), 303);
     if (saved.reason === 'not_found') return missing(c, services);
-    if (saved.reason === 'closed' || saved.reason === 'full') return showShift(c, services, undefined, 400);
+    if (saved.reason === 'closed') return showShift(c, services, undefined, 400);
+    if (saved.reason === 'full') {
+      const current = getAdminShift(services.db, id);
+      const left = current ? current.capacity - current.occupied : 0;
+      if (left > 0) {
+        return showShift(c, services, undefined, 400, {
+          token: textField(session.body, 'form_token'),
+          values: filled.values,
+          errors: { partySize: spotsLeftMessage(left) },
+          contactId,
+        });
+      }
+      return showShift(c, services, undefined, 400);
+    }
     if (saved.reason === 'duplicate') {
       return showShift(c, services, undefined, 400, {
         token: textField(session.body, 'form_token'),
@@ -1623,6 +1638,7 @@ function signupValuesFrom(body: Record<string, unknown>): SignupValues {
     email: textField(body, 'email'),
     phone: textField(body, 'phone'),
     notes: textField(body, 'notes'),
+    partySize: textField(body, 'party_size'),
   };
 }
 

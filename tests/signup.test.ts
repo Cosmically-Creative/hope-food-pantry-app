@@ -11,6 +11,7 @@ import { loadConfig } from '../src/config.js';
 import { openAppDatabase } from '../src/db.js';
 import { issueFormToken, MIN_FILL_MS } from '../src/form-token.js';
 import { SIGNUP_EMAIL_LIMIT, SIGNUP_IP_LIMIT } from '../src/rate-limit.js';
+import { switchSignup } from '../src/admin/store.js';
 import type { ReserveInput } from '../src/signup.js';
 import { verifyTurnstile, type TurnstileVerdict } from '../src/turnstile.js';
 import { devEnv } from './env.js';
@@ -286,6 +287,98 @@ describe('capacity-safe signup', () => {
     expect(db.prepare("SELECT COALESCE(SUM(group_size), 0) AS n FROM signups WHERE status = 'confirmed'").get()).toEqual({ n: 3 });
   }, 30_000);
 
+  it('holds several spots under one name', async () => {
+    const { app, db, shiftId } = await buildApp({ capacity: 4 });
+    const form = await app.request(`/s/${shiftId}`);
+    const formHtml = await form.text();
+    expect(formHtml).toContain('How many people?');
+    expect(formHtml).toContain('This signup holds that many spots.');
+    expect(formHtml).toContain('value="4"');
+
+    const saved = await postSignup(
+      app,
+      shiftId,
+      { name: 'Pat Review', email: 'pat.party@example.invalid', partySize: '3' },
+      { ip: '203.0.113.71' },
+    );
+    expect(saved.status).toBe(303);
+    expect(db.prepare('SELECT name, group_size, status FROM signups').get()).toEqual({
+      name: 'Pat Review',
+      group_size: 3,
+      status: 'confirmed',
+    });
+    const letter = db.prepare("SELECT body_text FROM outbox WHERE kind = 'confirmation'").get() as { body_text: string };
+    expect(letter.body_text).toContain('This signup holds 3 spots.');
+    const confirmed = await app.request(locationOf(saved), { headers: { cookie: cookiePair(saved.headers.get('set-cookie') ?? '') } });
+    const confirmedHtml = await confirmed.text();
+    expect(confirmedHtml).toContain('This signup holds 3 spots.');
+    const managePath = confirmedHtml.match(/href="(\/m\/[^"]+)"/)?.[1] ?? '';
+    const manageHtml = await (await app.request(managePath)).text();
+    expect(manageHtml).toContain('People');
+    expect(manageHtml).toContain('>3<');
+    const shiftHtml = await (await app.request(`/s/${shiftId}`)).text();
+    expect(shiftHtml).toContain('3/4 spots filled');
+    const board = await (await app.request('/?view=calendar')).text();
+    expect(board).toContain('Pat Review (3 people)');
+    expect(board).not.toContain('Pat Review (3 people), Pat Review');
+
+    const tooMany = await postSignup(
+      app,
+      shiftId,
+      { name: 'Sam Review', email: 'sam.party@example.invalid', partySize: '2' },
+      { ip: '203.0.113.72' },
+    );
+    expect(tooMany.status).toBe(409);
+    const tooManyHtml = await tooMany.text();
+    expect(tooManyHtml).toContain('This shift has 1 spot left.');
+    expect(tooManyHtml).toContain('How many people?');
+    expect(tooManyHtml).not.toContain('This shift is full.');
+
+    const nonsense = await postSignup(
+      app,
+      shiftId,
+      { name: 'Ada Review', email: 'ada.party@example.invalid', partySize: '0' },
+      { ip: '203.0.113.73' },
+    );
+    expect(nonsense.status).toBe(400);
+    expect(await nonsense.text()).toContain('Choose how many people are coming.');
+    expect(db.prepare("SELECT COUNT(*) AS n FROM signups WHERE status = 'confirmed'").get()).toEqual({ n: 1 });
+
+    const eventId = Number((db.prepare('SELECT event_id AS event_id FROM shifts WHERE id = ?').get(shiftId) as { event_id: number }).event_id);
+    const tight = insertExtraShift(db, {
+      capacity: 2,
+      starts: '2026-10-16T14:00:00.000Z',
+      ends: '2026-10-16T17:00:00.000Z',
+    });
+    const signupId = Number((db.prepare('SELECT id AS id FROM signups').get() as { id: number }).id);
+    const mail = {
+      baseUrl: 'http://127.0.0.1:3000',
+      basePath: '',
+      from: 'Hope Volunteer <signup@example.invalid>',
+      replyTo: 'signup@example.invalid',
+    };
+    const blocked = switchSignup(db, signupId, tight, 'switch-tight', NOW, mail);
+    expect(blocked.ok).toBe(false);
+    if (!blocked.ok) expect(blocked.error).toContain('does not have room');
+    expect(db.prepare("SELECT status FROM signups WHERE id = ?").get(signupId)).toEqual({ status: 'confirmed' });
+
+    const wide = insertExtraShift(db, {
+      capacity: 4,
+      starts: '2026-10-17T14:00:00.000Z',
+      ends: '2026-10-17T17:00:00.000Z',
+    });
+    const moved = switchSignup(db, signupId, wide, 'switch-wide', NOW, mail);
+    expect(moved.ok).toBe(true);
+    expect(db.prepare("SELECT group_size, status FROM signups WHERE shift_id = ? AND status = 'confirmed'").get(wide)).toEqual({
+      group_size: 3,
+      status: 'confirmed',
+    });
+    expect(db.prepare("SELECT COALESCE(SUM(group_size), 0) AS n FROM signups WHERE shift_id = ? AND status = 'confirmed'").get(shiftId)).toEqual({ n: 0 });
+    const changed = db.prepare("SELECT body_text FROM outbox WHERE kind = 'changed'").get() as { body_text: string };
+    expect(changed.body_text).toContain('This signup holds 3 spots.');
+    expect(eventId).toBeGreaterThan(0);
+  });
+
   it('treats an invalid or expired manage link as unavailable', async () => {
     const { app, db, shiftId } = await buildApp();
     const saved = await postSignup(app, shiftId, { email: 'link@example.invalid' }, { ip: '203.0.113.81' });
@@ -376,6 +469,7 @@ async function postSignup(
     phone: string;
     notes: string;
     company: string;
+    partySize: string;
   }>,
   options?: { token?: string; issuedAt?: number; ip?: string; origin?: string; forwardedFor?: string; site?: string },
 ) {
@@ -394,6 +488,7 @@ async function postSignup(
     email: fields.email ?? 'pat.review@example.invalid',
     phone: fields.phone ?? '712-555-0100',
     notes: fields.notes ?? '',
+    party_size: fields.partySize ?? '',
     company_website: fields.company ?? '',
     'cf-turnstile-response': 'widget-token',
   });

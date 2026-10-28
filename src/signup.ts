@@ -5,6 +5,7 @@ import { rememberSignupContact } from './contacts.js';
 import { normalizeEmail } from './email.js';
 import { queueCancellation, queueConfirmation, cancelPendingConfirmations, cancelPendingReminders } from './mail/queue.js';
 import type { MailIdentity } from './mail/types.js';
+import { MAX_PARTY_SIZE } from './signup-form.js';
 import { isWithinSignupWindow } from './signup-window.js';
 import { formatInstantInZone, formatUtc, todayInZone, type ZonedClock } from './time.js';
 
@@ -16,6 +17,8 @@ export type ReserveInput = {
   email: string;
   phone: string | null;
   notes: string | null;
+  /** Spots this one signup holds, including the person named on it. Omitted means 1. */
+  groupSize?: number;
   operationId: string;
   now: string;
   mail: MailIdentity;
@@ -34,6 +37,7 @@ export type ManageView = {
   email: string;
   phone: string | null;
   notes: string | null;
+  groupSize: number;
   status: 'confirmed' | 'cancelled';
   remindersOff: boolean;
   emailNorm: string;
@@ -46,7 +50,7 @@ export type ManageView = {
 };
 
 /**
- * Takes one spot only when the published shift still has room.
+ * Takes groupSize spots when the published shift still has room for all of them.
  * The immediate transaction is the capacity lock and also queues confirmation mail.
  * A later send failure does not undo the reservation.
  */
@@ -104,6 +108,7 @@ export function readManageSignup(db: Database.Database, token: string, now: stri
          su.email AS email,
          su.phone AS phone,
          su.notes AS notes,
+         su.group_size AS group_size,
          su.status AS status,
          su.reminders_off AS reminders_off,
          su.email_norm AS email_norm,
@@ -130,6 +135,7 @@ export function readManageSignup(db: Database.Database, token: string, now: stri
     email: row.email,
     phone: row.phone,
     notes: row.notes,
+    groupSize: Number(row.group_size),
     status: row.status,
     remindersOff: row.reminders_off === 1,
     emailNorm: row.email_norm,
@@ -183,6 +189,9 @@ function placeReservation(db: Database.Database, input: ReserveInput, emailNorm:
   }
   if (confirmedPersonOnShift(db, input.shiftId, emailNorm, input.name)) return { ok: false, reason: 'duplicate' };
 
+  const groupSize = input.groupSize ?? 1;
+  if (!Number.isInteger(groupSize) || groupSize < 1 || groupSize > MAX_PARTY_SIZE) return { ok: false, reason: 'conflict' };
+
   const occupied = db
     .prepare(
       `SELECT COALESCE(SUM(group_size), 0) AS occupied
@@ -190,7 +199,7 @@ function placeReservation(db: Database.Database, input: ReserveInput, emailNorm:
        WHERE shift_id = ? AND status = 'confirmed'`,
     )
     .get(input.shiftId) as { occupied: number };
-  if (Number(occupied.occupied) + 1 > shift.capacity) return { ok: false, reason: 'full' };
+  if (Number(occupied.occupied) + groupSize > shift.capacity) return { ok: false, reason: 'full' };
 
   const manageToken = randomBytes(32).toString('base64url');
   const expiresAt = formatUtc(Temporal.Instant.from(shift.ends_at_utc).add({ hours: MANAGE_TOKEN_TTL_HOURS }));
@@ -200,7 +209,7 @@ function placeReservation(db: Database.Database, input: ReserveInput, emailNorm:
          shift_id, name, email, email_norm, phone, is_minor, guardian_name, guardian_email,
          group_size, notes, status, manage_token_hash, token_expires_at, reminders_off,
          created_at, updated_at, operation_key
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'confirmed', ?, ?, 0, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, 0, ?, ?, ?)`,
     )
     .run(
       input.shiftId,
@@ -211,6 +220,7 @@ function placeReservation(db: Database.Database, input: ReserveInput, emailNorm:
       0,
       null,
       null,
+      groupSize,
       input.notes,
       sha256(manageToken),
       expiresAt,
@@ -226,6 +236,7 @@ function placeReservation(db: Database.Database, input: ReserveInput, emailNorm:
     token: manageToken,
     volunteerName: input.name,
     volunteerEmail: emailNorm,
+    groupSize,
     shift: shiftFacts(shift).facts,
     mail: input.mail,
     now: input.now,
@@ -275,7 +286,7 @@ function cancelConfirmed(db: Database.Database, hash: string, token: string, now
   const row = db
     .prepare(
       `SELECT su.id AS id, su.status AS status, su.token_expires_at AS token_expires_at, su.anonymized_at AS anonymized_at,
-              su.name AS name, su.email_norm AS email_norm, su.shift_id AS shift_id
+              su.name AS name, su.email_norm AS email_norm, su.shift_id AS shift_id, su.group_size AS group_size
        FROM signups su
        WHERE su.manage_token_hash = ?`,
     )
@@ -288,6 +299,7 @@ function cancelConfirmed(db: Database.Database, hash: string, token: string, now
         name: string | null;
         email_norm: string | null;
         shift_id: number;
+        group_size: number;
       }
     | undefined;
   if (!row || row.anonymized_at || !row.token_expires_at || row.token_expires_at <= now) {
@@ -314,6 +326,7 @@ function cancelConfirmed(db: Database.Database, hash: string, token: string, now
         token,
         volunteerName: row.name,
         volunteerEmail: row.email_norm,
+        groupSize: Number(row.group_size),
         shift: shift.facts,
         mail,
         now,
@@ -396,6 +409,7 @@ type ManageRow = {
   email_norm: string | null;
   phone: string | null;
   notes: string | null;
+  group_size: number;
   status: string;
   reminders_off: number;
   token_expires_at: string | null;

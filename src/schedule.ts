@@ -152,6 +152,11 @@ export function spotsSentence(shift: Pick<PublicShift, 'occupied' | 'capacity'>)
   return `${filled}/${shift.capacity} spots filled`;
 }
 
+/** One roster line. A signup that holds several spots stays one name, with the count beside it. */
+export function partyRosterLabel(name: string, groupSize: number): string {
+  return groupSize > 1 ? `${name} (${groupSize} people)` : name;
+}
+
 function presentShift(row: ShiftRow, now: string, volunteers: string[]): PublicShift {
   const start = formatInstantInZone(row.starts_at_utc, row.tz);
   const end = formatInstantInZone(row.ends_at_utc, row.tz);
@@ -205,17 +210,18 @@ function volunteerNamesByShift(db: Database.Database, shiftIds: number[]): Map<n
   const marks = shiftIds.map(() => '?').join(', ');
   const rows = db
     .prepare(
-      `SELECT shift_id AS shift_id, name AS name
+      `SELECT shift_id AS shift_id, name AS name, group_size AS group_size
        FROM signups
        WHERE status = 'confirmed' AND anonymized_at IS NULL AND name IS NOT NULL
          AND shift_id IN (${marks})
        ORDER BY name COLLATE NOCASE, id`,
     )
-    .all(...shiftIds) as { shift_id: number; name: string }[];
+    .all(...shiftIds) as { shift_id: number; name: string; group_size: number }[];
   for (const row of rows) {
+    const label = partyRosterLabel(row.name, Number(row.group_size));
     const listed = names.get(row.shift_id);
-    if (listed) listed.push(row.name);
-    else names.set(row.shift_id, [row.name]);
+    if (listed) listed.push(label);
+    else names.set(row.shift_id, [label]);
   }
   return names;
 }

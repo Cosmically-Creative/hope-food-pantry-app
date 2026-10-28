@@ -27,7 +27,7 @@ import {
 import { recordInvalidManageToken, recordSignupEmail, recordSignupIp, recordSwitchAttempt } from './rate-limit.js';
 import { getPublicShift, type PublicShift } from './schedule.js';
 import { SIGNUP_TOO_EARLY } from './signup-window.js';
-import { EMPTY_SIGNUP, parseSignupForm, type SignupErrors, type SignupValues } from './signup-form.js';
+import { EMPTY_SIGNUP, parseSignupForm, spotsLeftMessage, type SignupErrors, type SignupValues } from './signup-form.js';
 import type { MailIdentity } from './mail/types.js';
 import { disableReminders } from './reminders.js';
 import { cancelSignup, confirmedOperationShift, findSignupByOperation, readManageSignup, reserveSignup } from './signup.js';
@@ -90,6 +90,7 @@ export function registerPublicSignup(app: Hono, services: SignupServices): void 
         shift={shift}
         name={matches && manage ? manage.name : null}
         managePath={matches && seal ? appPath(config, `/m/${seal.token}`) : null}
+        groupSize={matches && manage ? manage.groupSize : undefined}
         cancelled={cancelled}
       />,
     );
@@ -163,6 +164,7 @@ async function submitSignup(c: Context, services: SignupServices): Promise<Respo
       email: parsed.draft.emailNorm,
       phone: parsed.draft.phone,
       notes: parsed.draft.notes,
+      groupSize: parsed.draft.groupSize,
       operationId: tokenResult.claims.operationId,
       now,
       mail: mailIdentity(db, config),
@@ -171,7 +173,19 @@ async function submitSignup(c: Context, services: SignupServices): Promise<Respo
     if (reserved.reason === 'not_found') return html(c, services, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
     if (reserved.reason === 'closed') return shiftResponse(c, services, loadShift(services, String(shift.id)) ?? shift, 400, null, CLOSED);
     if (reserved.reason === 'early') return shiftResponse(c, services, loadShift(services, String(shift.id)) ?? shift, 400, null, SIGNUP_TOO_EARLY);
-    if (reserved.reason === 'full') return shiftResponse(c, services, loadShift(services, String(shift.id)) ?? shift, 409, null, FULL);
+    if (reserved.reason === 'full') {
+      const current = loadShift(services, String(shift.id)) ?? shift;
+      if (current.remaining > 0) {
+        return shiftResponse(
+          c,
+          services,
+          current,
+          409,
+          formFor(services, shift, values, { partySize: spotsLeftMessage(current.remaining) }, textField(body, 'form_token')),
+        );
+      }
+      return shiftResponse(c, services, current, 409, null, FULL);
+    }
     if (reserved.reason === 'duplicate') {
       return shiftResponse(c, services, shift, 409, formFor(services, shift, values, {}, null), ALREADY_SIGNED_UP);
     }
@@ -277,6 +291,7 @@ function valuesFrom(body: Record<string, unknown>): SignupValues {
     email: textField(body, 'email'),
     phone: textField(body, 'phone'),
     notes: textField(body, 'notes'),
+    partySize: textField(body, 'party_size'),
   };
 }
 
@@ -399,11 +414,12 @@ function switchedAlready(c: Context, services: SignupServices, token: string, bo
   return html(c, services, 'Your signup · Hope Volunteer', <SwitchAlreadyPage />);
 }
 
-function switchForm(services: SignupServices, token: string, signup: { status: 'confirmed' | 'cancelled'; shiftId: number; eventId: number; name: string; email: string }): SwitchForm | null {
+function switchForm(services: SignupServices, token: string, signup: { status: 'confirmed' | 'cancelled'; shiftId: number; eventId: number; name: string; email: string; groupSize: number }): SwitchForm | null {
   if (signup.status !== 'confirmed') return null;
   const targets = listMoveTargets(services.db, signup.eventId, signup.shiftId, services.now(), {
     publishedOnly: true,
     signupWindow: true,
+    spotsNeeded: signup.groupSize,
   });
   if (targets.length === 0) return { action: '', token: '', formToken: '', targets };
   return {

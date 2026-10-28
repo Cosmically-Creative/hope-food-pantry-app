@@ -23,12 +23,13 @@ export function renderConfirmation(input: {
   shift: MailShift;
   manageUrl: string;
   replyTo: string;
+  groupSize?: number;
 }): RenderedMail {
   const role = singleLine(input.shift.role);
   const name = singleLine(input.volunteerName);
   return render({
     subject: `You're signed up for ${role}`,
-    hello: `You are signed up for ${role}.`,
+    hello: `You are signed up for ${role}.${partyNote(input.groupSize)}`,
     greeting: `Hello ${name},`,
     shift: input.shift,
     linkLabel: 'Open this signup',
@@ -44,12 +45,14 @@ export function renderCancellation(input: {
   manageUrl: string;
   replyTo: string;
   linkNote?: string;
+  groupSize?: number;
 }): RenderedMail {
   const role = singleLine(input.shift.role);
   const name = singleLine(input.volunteerName);
+  const spots = input.groupSize && input.groupSize > 1 ? `The ${input.groupSize} spots this signup held are open for someone else.` : 'The spot is open for someone else.';
   return render({
     subject: `Your signup for ${role} is cancelled`,
-    hello: `Your signup for ${role} is cancelled. The spot is open for someone else.`,
+    hello: `Your signup for ${role} is cancelled. ${spots}`,
     greeting: `Hello ${name},`,
     shift: input.shift,
     linkLabel: 'Open this signup',
@@ -64,6 +67,7 @@ export function renderChanged(input: {
   shift: MailShift;
   manageUrl: string;
   replyTo: string;
+  groupSize?: number;
 }): RenderedMail {
   const role = singleLine(input.shift.role);
   return changedLetter(input, `Your ${role} shift has changed`, `The time or place for your ${role} shift has changed.`);
@@ -74,6 +78,7 @@ export function renderMoved(input: {
   shift: MailShift;
   manageUrl: string;
   replyTo: string;
+  groupSize?: number;
 }): RenderedMail {
   const role = singleLine(input.shift.role);
   return changedLetter(input, `Your signup was moved to ${role}`, 'A coordinator moved your signup to a different shift.');
@@ -84,20 +89,21 @@ export function renderSwitched(input: {
   shift: MailShift;
   manageUrl: string;
   replyTo: string;
+  groupSize?: number;
 }): RenderedMail {
   const role = singleLine(input.shift.role);
   return changedLetter(input, `Your signup was switched to ${role}`, 'You switched this signup to a different shift.');
 }
 
 function changedLetter(
-  input: { volunteerName: string; shift: MailShift; manageUrl: string; replyTo: string },
+  input: { volunteerName: string; shift: MailShift; manageUrl: string; replyTo: string; groupSize?: number },
   subject: string,
   hello: string,
 ): RenderedMail {
   const name = singleLine(input.volunteerName);
   return render({
     subject,
-    hello,
+    hello: `${hello}${partyNote(input.groupSize)}`,
     greeting: `Hello ${name},`,
     shift: input.shift,
     linkLabel: 'Open this signup',
@@ -112,11 +118,12 @@ export function renderReminder(input: {
   shift: MailShift;
   unsubscribeUrl: string;
   replyTo: string;
+  groupSize?: number;
 }): RenderedMail {
   const role = singleLine(input.shift.role);
   const name = singleLine(input.volunteerName);
   const subject = `Reminder: ${role}`;
-  const hello = `You are still signed up for ${role}.`;
+  const hello = `You are still signed up for ${role}.${partyNote(input.groupSize)}`;
   const cancelNote = 'To cancel, use the link in your confirmation email.';
   const stopNote = `To stop reminder emails for this signup, open ${input.unsubscribeUrl}. The pantry reads mail sent to ${input.replyTo}. Stopping reminders does not cancel the signup. Confirmation, change, and cancellation emails still arrive.`;
   const greeting = `Hello ${name},`;
@@ -177,6 +184,11 @@ export function renderMagicLink(input: { signInUrl: string; replyTo: string }): 
 </body>
 </html>`;
   return { subject, text, html };
+}
+
+function partyNote(groupSize: number | undefined): string {
+  if (!groupSize || groupSize <= 1) return '';
+  return ` This signup holds ${groupSize} spots.`;
 }
 
 function render(input: {

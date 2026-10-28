@@ -69,7 +69,7 @@
     note.className = 'signup-dialog-note';
     note.setAttribute('role', 'status');
     note.textContent = 'Loading the signup form.';
-    panel.appendChild(note);
+    panelScroll(panel).appendChild(note);
     body.replaceChildren(panel);
   }
 
@@ -84,7 +84,7 @@
     link.href = href;
     link.textContent = 'Open the shift page';
     note.appendChild(link);
-    panel.appendChild(note);
+    panelScroll(panel).appendChild(note);
     body.replaceChildren(panel);
     if (closeButton) closeButton.focus();
   }
@@ -116,6 +116,7 @@
     var notice = main.querySelector('p.error');
     if (notice && (!form || !form.contains(notice))) summary.appendChild(document.importNode(notice, true));
     panel.appendChild(summary);
+    var scroll = attachScroll(panel);
     if (!form) {
       var closed = document.createElement('p');
       closed.className = 'signup-dialog-note';
@@ -125,14 +126,14 @@
       } else {
         closed.textContent = 'This shift is not open for signup.';
       }
-      panel.appendChild(closed);
+      scroll.appendChild(closed);
       body.replaceChildren(panel);
       if (closeButton) closeButton.focus();
       return;
     }
     var liveForm = document.importNode(form, true);
     liveForm.querySelectorAll('noscript').forEach(function (node) { node.remove(); });
-    panel.appendChild(liveForm);
+    scroll.appendChild(liveForm);
     body.replaceChildren(panel);
     bindForm(liveForm);
     mountTurnstile(liveForm);
@@ -245,7 +246,19 @@
     title.textContent = text;
     summary.appendChild(title);
     panel.appendChild(summary);
+    attachScroll(panel);
     return panel;
+  }
+
+  function attachScroll(panel) {
+    var scroll = document.createElement('div');
+    scroll.className = 'signup-dialog-scroll';
+    panel.appendChild(scroll);
+    return scroll;
+  }
+
+  function panelScroll(panel) {
+    return panel.querySelector('.signup-dialog-scroll') || panel;
   }
 
   function appendFrom(parent, root, selector) {

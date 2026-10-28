@@ -3,7 +3,7 @@ import type { AppConfig } from './config.js';
 import { WEEKDAY_SHORT, calendarMonth, calendarToday, chooseCalendarMonth, monthStep, type CalendarDay } from './calendar.js';
 import { WEDNESDAY, spotsSentence, type PublicEvent, type PublicShift } from './schedule.js';
 import { SIGNUP_TOO_EARLY, signupDeadlineLabel } from './signup-window.js';
-import type { SignupErrors, SignupValues } from './signup-form.js';
+import { partyChoiceLabel, partyChoices, type SignupErrors, type SignupValues } from './signup-form.js';
 import type { MoveTarget } from './admin/store.js';
 import { ShiftTargetOptions } from './shift-options.js';
 import type { ManageView } from './signup.js';
@@ -282,7 +282,9 @@ export function ShiftPage(props: {
           {props.notice}
         </p>
       ) : null}
-      {props.signup ? <SignupForm config={props.config} shiftId={props.shift.id} form={props.signup} /> : null}
+      {props.signup ? (
+        <SignupForm config={props.config} shiftId={props.shift.id} remaining={props.shift.remaining} form={props.signup} />
+      ) : null}
     </>
   );
 }
@@ -292,6 +294,7 @@ export function ConfirmationPage(props: {
   shift: PublicShift;
   name: string | null;
   managePath: string | null;
+  groupSize?: number;
   cancelled?: boolean;
 }) {
   return (
@@ -302,6 +305,7 @@ export function ConfirmationPage(props: {
           ? `${props.name ? `${props.name} is no longer on the ` : 'This signup is no longer for the '}${props.shift.role} shift.`
           : `${props.name ? `${props.name} is on the ` : 'This signup is for the '}${props.shift.role} shift.`}
       </p>
+      {props.groupSize && props.groupSize > 1 ? <p>This signup holds {props.groupSize} spots.</p> : null}
       <ShiftWhen shift={props.shift} />
       {props.managePath ? (
         <>
@@ -353,6 +357,10 @@ export function ManagePage(props: {
           <dd>{signup.name}</dd>
         </div>
         <div>
+          <dt>People</dt>
+          <dd>{signup.groupSize}</dd>
+        </div>
+        <div>
           <dt>Email</dt>
           <dd>{signup.email}</dd>
         </div>
@@ -377,10 +385,18 @@ export function ManagePage(props: {
       ) : null}
       {props.switches ? (
         props.switches.targets.length === 0 ? (
-          <p>There is no other open shift you can switch to.</p>
+          <p>
+            {signup.groupSize > 1
+              ? 'There is no other open shift with room for everyone on this signup.'
+              : 'There is no other open shift you can switch to.'}
+          </p>
         ) : (
           <form class="move-form" method="post" action={props.switches.action}>
-            <p>Switch to another shift in this event. This opens your spot here and queues a change email. This link stops working, and the next page has the new one.</p>
+            <p>
+              {signup.groupSize > 1
+                ? `Switch to another shift in this event. This opens the ${signup.groupSize} spots here and queues a change email. This link stops working, and the next page has the new one.`
+                : 'Switch to another shift in this event. This opens your spot here and queues a change email. This link stops working, and the next page has the new one.'}
+            </p>
             <input type="hidden" name="switch_token" value={props.switches.token} />
             <input type="hidden" name="form_token" value={props.switches.formToken} />
             <label for="switch-to">
@@ -406,12 +422,20 @@ export function ManagePage(props: {
         ) : null}
         {props.cancel ? (
           <form class="cancel-form" method="post" action={props.cancel.action}>
-            <p>Cancel this signup to open the spot for someone else. A cancellation email is queued when you cancel.</p>
+            <p>
+              {signup.groupSize > 1
+                ? `Cancel this signup to open these ${signup.groupSize} spots for someone else. A cancellation email is queued when you cancel.`
+                : 'Cancel this signup to open the spot for someone else. A cancellation email is queued when you cancel.'}
+            </p>
             <input type="hidden" name="cancel_token" value={props.cancel.token} />
             <button type="submit">Cancel this signup</button>
           </form>
         ) : (
-          <p>This signup is cancelled. The spot is open for someone else. A cancellation email is queued.</p>
+          <p>
+            {signup.groupSize > 1
+              ? `This signup is cancelled. The ${signup.groupSize} spots it held are open for someone else. A cancellation email is queued.`
+              : 'This signup is cancelled. The spot is open for someone else. A cancellation email is queued.'}
+          </p>
         )}
       </div>
     </>
@@ -874,14 +898,14 @@ function Spots(props: { shift: PublicShift }) {
   return <p class={props.shift.full ? 'spots is-full' : 'spots is-open'}>{spotsSentence(props.shift)}</p>;
 }
 
-function SignupForm(props: { config: AppConfig; shiftId: number; form: SignupFormView }) {
+function SignupForm(props: { config: AppConfig; shiftId: number; remaining: number; form: SignupFormView }) {
   const form = props.form;
   const errors = form.errors;
   const errorEntries = Object.entries(errors).filter((entry): entry is [string, string] => Boolean(entry[1]));
   return (
     <form class="signup-form" method="post" action={appPath(props.config, `/s/${props.shiftId}`)}>
       <h2>Sign up</h2>
-      <p>Each signup is for one person and takes one spot. Another person can use the same email address.</p>
+      <p>Choose how many people are coming, including you. This signup holds that many spots under your name. Another person can use the same email address.</p>
       <noscript>
         <p class="error">Signing up needs JavaScript for the abuse check. The pantry has not published a contact method for help with signup.</p>
       </noscript>
@@ -926,6 +950,7 @@ function SignupForm(props: { config: AppConfig; shiftId: number; form: SignupFor
           required
         />
       </div>
+      <PartySizeField idPrefix="signup" value={form.values.partySize} error={errors.partySize} remaining={props.remaining} />
       <Field id="signup-email" label="Email" name="email" type="email" value={form.values.email} error={errors.email} autoComplete="email" />
       <Field
         id="signup-phone"
@@ -952,6 +977,37 @@ function SignupForm(props: { config: AppConfig; shiftId: number; form: SignupFor
       <p id="signup-turnstile-hint">This check confirms the signup came from a browser.</p>
       <button type="submit">Sign up</button>
     </form>
+  );
+}
+
+export function PartySizeField(props: { idPrefix: string; value: string; error?: string; remaining: number }) {
+  const id = `${props.idPrefix}-partySize`;
+  const hintId = `${id}-hint`;
+  const errorId = `${id}-error`;
+  return (
+    <label for={id}>
+      How many people?
+      <select
+        id={id}
+        name="party_size"
+        aria-invalid={props.error ? 'true' : undefined}
+        aria-describedby={props.error ? `${hintId} ${errorId}` : hintId}
+      >
+        {partyChoices(props.remaining).map((count) => (
+          <option key={count} value={String(count)} selected={props.value === String(count) ? true : undefined}>
+            {partyChoiceLabel(count)}
+          </option>
+        ))}
+      </select>
+      <span class="hint" id={hintId}>
+        Including you. This signup holds that many spots. You don't need to add their names.
+      </span>
+      {props.error ? (
+        <span class="field-error" id={errorId}>
+          {props.error}
+        </span>
+      ) : null}
+    </label>
   );
 }
 

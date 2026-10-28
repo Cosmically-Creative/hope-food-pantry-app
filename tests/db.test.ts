@@ -200,7 +200,49 @@ describe('database startup', () => {
 });
 
 describe('signup and shift constraints', () => {
-  it('enforces capacity, individual signups, duplicates, anonymization, and history', async () => {
+  it('keeps existing signups when one signup can hold several spots', async () => {
+    const root = makeDir();
+    const migrations = path.join(root, 'migrations');
+    const dataDir = path.join(root, 'data');
+    mkdirSync(migrations);
+    const real = defaultMigrationsDir();
+    for (const name of readdirSync(real)) {
+      if (name.startsWith('008')) continue;
+      copyFileSync(path.join(real, name), path.join(migrations, name));
+    }
+    const config = loadConfig(devEnv({ DATA_DIR: dataDir }));
+    const first = await openAppDatabase(config, { migrationsDir: migrations });
+    const parents = insertParents(first);
+    insertSignup(first, parents.shiftId, { email: 'ada@example.invalid', emailNorm: 'ada@example.invalid' });
+    const signupId = Number((first.prepare('SELECT id AS id FROM signups').get() as { id: number }).id);
+    first
+      .prepare(
+        `INSERT INTO outbox (
+           dedupe_key, signup_id, shift_id, kind, to_email, subject, body_text, body_html, send_after, status, created_at
+         ) VALUES ('keep', ?, ?, 'confirmation', 'ada@example.invalid', 'Hi', 'Hi', '<p>Hi</p>', ?, 'pending', ?)`,
+      )
+      .run(signupId, parents.shiftId, INSTANT, INSTANT);
+    first.close();
+
+    copyFileSync(path.join(real, '008_party_size.sql'), path.join(migrations, '008_party_size.sql'));
+    const second = await openAppDatabase(config, { migrationsDir: migrations });
+    try {
+      expect(second.pragma('foreign_keys', { simple: true })).toBe(1);
+      expect(second.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      expect(second.prepare('SELECT name, group_size FROM signups WHERE id = ?').get(signupId)).toEqual({
+        name: 'Fake Person',
+        group_size: 1,
+      });
+      expect(second.prepare('SELECT signup_id AS signup_id FROM outbox WHERE dedupe_key = ?').get('keep')).toEqual({
+        signup_id: signupId,
+      });
+      expect(second.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'signups_next'").get()).toBeUndefined();
+    } finally {
+      second.close();
+    }
+  });
+
+  it('enforces capacity, party size, duplicates, anonymization, and history', async () => {
     const dataDir = path.join(makeDir(), 'data');
     const db = await openAppDatabase(loadConfig(devEnv({ DATA_DIR: dataDir })));
     try {
@@ -246,8 +288,12 @@ describe('signup and shift constraints', () => {
         status: 'cancelled',
       });
 
+      insertSignup(db, parents.shiftId, { email: 'ben@example.invalid', emailNorm: 'ben@example.invalid', groupSize: 2 });
       expect(() =>
-        insertSignup(db, parents.shiftId, { email: 'ben@example.invalid', emailNorm: 'ben@example.invalid', groupSize: 2 }),
+        insertSignup(db, parents.shiftId, { email: 'zero@example.invalid', emailNorm: 'zero@example.invalid', groupSize: 0 }),
+      ).toThrow(/CHECK/);
+      expect(() =>
+        insertSignup(db, parents.shiftId, { email: 'many@example.invalid', emailNorm: 'many@example.invalid', groupSize: 21 }),
       ).toThrow(/CHECK/);
       expect(() =>
         insertSignup(db, parents.shiftId, {

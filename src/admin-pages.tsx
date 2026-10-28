@@ -15,6 +15,7 @@ import {
   type ContactShift,
 } from './contacts.js';
 import type { SignupErrors, SignupValues } from './signup-form.js';
+import { PartySizeField } from './pages.js';
 import { addLocalDays, formatInstantInZone, todayInZone } from './time.js';
 import { ShiftTargetOptions } from './shift-options.js';
 import type { AdminAccount, AdminErrors, AdminForm } from './admins.js';
@@ -974,7 +975,7 @@ export function ShiftRoster(props: {
           ) : null}
         </div>
         <p class="panel-note">Cancelling a signup emails them. Their old private link stops working, and the email includes a new one.</p>
-        <p class="panel-note">Moving a confirmed signup opens this spot and queues a change email. Their old private link stops working.</p>
+        <p class="panel-note">Moving a confirmed signup opens the spots it holds and queues a change email. Their old private link stops working.</p>
         {props.moves && props.moves.targets.length === 0 ? <p class="panel-note">No other open shift in this event has room.</p> : null}
         {props.shift.people.length === 0 ? (
           <p class="empty">No one has signed up.</p>
@@ -984,7 +985,14 @@ export function ShiftRoster(props: {
       </section>
       {props.walkIn ? (
         <section class="desk-events" aria-labelledby="walkin-heading">
-          <WalkInForm config={props.config} csrf={props.csrf} shiftId={props.shift.id} form={props.walkIn} contacts={props.contacts ?? []} />
+          <WalkInForm
+            config={props.config}
+            csrf={props.csrf}
+            shiftId={props.shift.id}
+            spotsLeft={Math.max(0, props.shift.capacity - props.shift.occupied)}
+            form={props.walkIn}
+            contacts={props.contacts ?? []}
+          />
         </section>
       ) : props.walkInNote ? (
         <p class="panel-note">{props.walkInNote}</p>
@@ -1643,7 +1651,14 @@ function ShiftEditorForm(props: { config: AppConfig; csrf: string; shift: AdminS
   );
 }
 
-function WalkInForm(props: { config: AppConfig; csrf: string; shiftId: number; form: WalkInState; contacts: Contact[] }) {
+function WalkInForm(props: {
+  config: AppConfig;
+  csrf: string;
+  shiftId: number;
+  spotsLeft: number;
+  form: WalkInState;
+  contacts: Contact[];
+}) {
   const values = props.form.values;
   const errors = props.form.errors;
   const errorEntries = Object.entries(errors).filter((entry): entry is [string, string] => Boolean(entry[1]));
@@ -1651,7 +1666,7 @@ function WalkInForm(props: { config: AppConfig; csrf: string; shiftId: number; f
   return (
     <form method="post" action={appPath(props.config, `/admin/shifts/${props.shiftId}/walk-in`)} class="signup-form event-details-form">
       <h2 id="walkin-heading">Add a walk-in</h2>
-      <p>This is one person who is here. It takes one spot and queues a confirmation email. Another person can use the same email. Their name is listed on the public sign-up page when this shift is posted there. Email and notes stay off that page.</p>
+      <p>Choose how many people are here, including the person named below. This signup holds that many spots and queues one confirmation email. Another person can use the same email. The name is listed on the public sign-up page when this shift is posted there. Email and notes stay off that page.</p>
       {props.form.message ? <p class="error">{props.form.message}</p> : null}
       {errorEntries.length > 0 ? (
         <div class="error" role="alert">
@@ -1695,6 +1710,7 @@ function WalkInForm(props: { config: AppConfig; csrf: string; shiftId: number; f
       <WalkInField id="walkin-name" label="Name" name="name" type="text" value={values.name} error={errors.name} />
       <WalkInField id="walkin-email" label="Email" name="email" type="email" value={values.email} error={errors.email} />
       <WalkInField id="walkin-phone" label="Phone" name="phone" type="tel" value={values.phone} error={errors.phone} required />
+      <PartySizeField idPrefix="walkin" value={values.partySize} error={errors.partySize} remaining={props.spotsLeft} />
       <label for="walkin-notes">
         Notes (optional)
         <textarea id="walkin-notes" name="notes" aria-invalid={errors.notes ? 'true' : undefined} aria-describedby={errors.notes ? 'walkin-notes-error' : undefined}>
@@ -1765,6 +1781,7 @@ function Roster(props: { config: AppConfig; csrf: string; people: RosterPerson[]
             ) : null}
             <strong>{person.name}</strong>
           </p>
+          {person.groupSize > 1 ? <p>Holds {person.groupSize} spots</p> : null}
           <p>{person.email}</p>
           {person.phone ? <p>{person.phone}</p> : null}
           {person.notes ? <p>Note: {person.notes}</p> : null}

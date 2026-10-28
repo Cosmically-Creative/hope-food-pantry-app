@@ -87,6 +87,7 @@ export type RosterPerson = {
   email: string;
   phone: string | null;
   notes: string | null;
+  groupSize: number;
   status: 'confirmed' | 'cancelled';
 };
 
@@ -291,7 +292,7 @@ export function getAdminShift(db: Database.Database, id: number): AdminShift | n
   if (!row) return null;
   const people = db
     .prepare(
-      `SELECT id, name, email, phone, notes, status
+      `SELECT id, name, email, phone, notes, status, group_size
        FROM signups
        WHERE shift_id = ? AND anonymized_at IS NULL AND name IS NOT NULL AND email IS NOT NULL
        ORDER BY CASE status WHEN 'confirmed' THEN 0 ELSE 1 END, id`,
@@ -303,6 +304,7 @@ export function getAdminShift(db: Database.Database, id: number): AdminShift | n
     phone: string | null;
     notes: string | null;
     status: string;
+    group_size: number;
   }>;
   return {
     ...presentShift(row, row.tz),
@@ -318,6 +320,7 @@ export function getAdminShift(db: Database.Database, id: number): AdminShift | n
         email: person.email,
         phone: person.phone,
         notes: person.notes,
+        groupSize: Number(person.group_size),
         status: person.status,
       }];
     }),
@@ -962,7 +965,7 @@ export function listMoveTargets(
   eventId: number,
   shiftId: number,
   now: string,
-  options?: { publishedOnly?: boolean; excludePerson?: { email: string; name: string }; signupWindow?: boolean },
+  options?: { publishedOnly?: boolean; excludePerson?: { email: string; name: string }; signupWindow?: boolean; spotsNeeded?: number },
 ): MoveTarget[] {
   const blocked = new Set<number>();
   if (options?.excludePerson) {
@@ -995,7 +998,8 @@ export function listMoveTargets(
   return rows.flatMap((row) => {
     if (options?.publishedOnly && row.published !== 1) return [];
     if (blocked.has(row.id)) return [];
-    if (Number(row.occupied) >= Number(row.capacity)) return [];
+    const needed = options?.spotsNeeded && options.spotsNeeded > 0 ? options.spotsNeeded : 1;
+    if (Number(row.occupied) + needed > Number(row.capacity)) return [];
     const start = formatInstantInZone(row.starts_at_utc, row.tz);
     const end = formatInstantInZone(row.ends_at_utc, row.tz);
     if (options?.signupWindow && !isWithinSignupWindow(start.date, todayInZone(row.tz, Temporal.Instant.from(now)))) return [];
@@ -1058,8 +1062,8 @@ export type MoveResult =
   | { ok: false; error: string; shiftId?: number };
 
 /**
- * Moves one confirmed person onto another open shift in the same event.
- * The cancellation and the new signup commit together. A failed move leaves the original signup confirmed.
+ * Moves one confirmed signup onto another open shift in the same event.
+ * Every spot the signup holds moves with it. A failed move leaves the original signup confirmed.
  */
 export function moveSignup(
   db: Database.Database,
@@ -1196,8 +1200,11 @@ function relocate(
        FROM signups WHERE shift_id = ? AND status = 'confirmed'`,
     )
     .get(destination.id) as { occupied: number };
-  if (Number(occupied.occupied) + 1 > destination.capacity) {
-    return { ok: false, error: transferError(options.audience, 'full'), shiftId: source.shift_id };
+  const groupSize = Number(source.group_size);
+  const taken = Number(occupied.occupied);
+  if (taken + groupSize > destination.capacity) {
+    const code = groupSize > 1 && taken < destination.capacity ? 'room' : 'full';
+    return { ok: false, error: transferError(options.audience, code), shiftId: source.shift_id };
   }
 
   const retired = issueManageToken(destination.ends_at_utc);
@@ -1219,7 +1226,7 @@ function relocate(
          shift_id, name, email, email_norm, phone, is_minor, guardian_name, guardian_email,
          group_size, notes, status, manage_token_hash, token_expires_at, reminders_off,
          created_at, updated_at, operation_key
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'confirmed', ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       destination.id,
@@ -1230,6 +1237,7 @@ function relocate(
       source.is_minor,
       source.is_minor === 1 ? source.guardian_name : null,
       source.is_minor === 1 ? source.guardian_email : null,
+      groupSize,
       source.notes,
       issued.hash,
       issued.expiresAt,
@@ -1250,6 +1258,7 @@ function relocate(
       token: issued.token,
       volunteerName: source.name,
       volunteerEmail: source.email_norm,
+      groupSize,
       shift: shift.facts,
       mail,
       now,
@@ -1284,6 +1293,7 @@ function transferError(audience: TransferOptions['audience'], code: TransferErro
     early: 'That shift is not open for sign-up yet.',
     duplicate: 'That person is already signed up for this shift.',
     full: 'That shift is full.',
+    room: 'That shift does not have room for everyone on this signup.',
     used: 'This form was already used for a different signup. Submit it again.',
     foreign: 'That signup is not on this page.',
     already: 'That signup is already cancelled.',
@@ -1299,6 +1309,7 @@ function transferError(audience: TransferOptions['audience'], code: TransferErro
     early: 'Sign-up for that shift opens three months before the date.',
     duplicate: 'You are already signed up for that shift.',
     full: 'That shift is full.',
+    room: 'That shift does not have room for everyone on this signup.',
     used: 'This form was already used. Open the link from your email.',
     foreign: 'That signup is not on this page.',
     already: 'That signup is already cancelled.',
@@ -1317,6 +1328,7 @@ type TransferError =
   | 'early'
   | 'duplicate'
   | 'full'
+  | 'room'
   | 'used'
   | 'foreign'
   | 'already';
@@ -1327,7 +1339,7 @@ function loadMoveSource(db: Database.Database, signupId: number): MoveSource | n
       `SELECT su.id AS id, su.shift_id AS shift_id, s.event_id AS event_id, su.name AS name, su.email AS email,
               su.email_norm AS email_norm, su.phone AS phone, su.notes AS notes, su.is_minor AS is_minor,
               su.guardian_name AS guardian_name, su.guardian_email AS guardian_email, su.reminders_off AS reminders_off,
-              su.status AS status
+              su.group_size AS group_size, su.status AS status
        FROM signups su
        JOIN shifts s ON s.id = su.shift_id
        WHERE su.id = ? AND su.anonymized_at IS NULL`,
@@ -1351,7 +1363,7 @@ function findMoveOperation(
   return row ?? null;
 }
 
-/** One named person, one spot, same capacity and person rules as public signup. */
+/** One named signup. groupSize reserves that many spots, with the same rules as public signup. */
 export function addWalkIn(
   db: Database.Database,
   coordinatorId: number,
@@ -1385,7 +1397,7 @@ function bumpAndNotify(db: Database.Database, shiftId: number, now: string, mail
   if (!shift) return 0;
   const people = db
     .prepare(
-      `SELECT id, name, email_norm, shift_id, status
+      `SELECT id, name, email_norm, shift_id, status, group_size
        FROM signups
        WHERE shift_id = ? AND status = 'confirmed' AND anonymized_at IS NULL AND name IS NOT NULL AND email_norm IS NOT NULL`,
     )
@@ -1401,6 +1413,7 @@ function bumpAndNotify(db: Database.Database, shiftId: number, now: string, mail
       token,
       volunteerName: person.name,
       volunteerEmail: person.email_norm,
+      groupSize: Number(person.group_size),
       shift: shift.facts,
       mail,
       now,
@@ -1413,7 +1426,7 @@ function bumpAndNotify(db: Database.Database, shiftId: number, now: string, mail
 function cancelConfirmedOnShift(db: Database.Database, shiftId: number, now: string, mail: MailIdentity): number {
   const people = db
     .prepare(
-      `SELECT id, name, email_norm, shift_id, status
+      `SELECT id, name, email_norm, shift_id, status, group_size
        FROM signups
        WHERE shift_id = ? AND status = 'confirmed' AND anonymized_at IS NULL AND name IS NOT NULL AND email_norm IS NOT NULL`,
     )
@@ -1446,6 +1459,7 @@ function cancelConfirmedPerson(db: Database.Database, person: PersonRow, now: st
     token: issued.token,
     volunteerName: person.name,
     volunteerEmail: person.email_norm,
+    groupSize: Number(person.group_size),
     shift: shift.facts,
     mail,
     now,
@@ -1658,6 +1672,7 @@ type PersonRow = {
   email_norm: string | null;
   shift_id: number;
   status: string;
+  group_size: number;
 };
 
 type MoveSource = {
@@ -1673,5 +1688,6 @@ type MoveSource = {
   guardian_name: string | null;
   guardian_email: string | null;
   reminders_off: number;
+  group_size: number;
   status: string;
 };
