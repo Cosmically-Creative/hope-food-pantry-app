@@ -37,6 +37,8 @@
   --hope-open-edge: #c5d7b4;
   --hope-full: #f6e2de;
   --hope-full-edge: #e4c4be;
+  --hope-blue-quiet: #d7ebf8;
+  --hope-blue-quiet-ink: #2d5f86;
   --hope-scrollbar-size: 14px;
   --hope-scrollbar-thumb: var(--hope-gold);
   --hope-scrollbar-thumb-hover: color-mix(in srgb, var(--hope-gold) 72%, var(--hope-ink));
@@ -849,11 +851,40 @@ main a:hover {
   background: var(--hope-blue-50);
 }
 
+.shift-pane.is-ended::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: rgb(255 255 255 / 0.5);
+  pointer-events: none;
+}
+
+.shift-pane.is-ended {
+  position: relative;
+}
+
+/* Full is two lines and Sign up uses the large type. One height keeps that band even. */
+.shift-pane > .btn-card {
+  min-height: calc(1.7rem + 2.125rem);
+}
+
 .shift-pane-body {
   display: grid;
+  align-content: start;
   gap: 0.15rem;
   flex: 1;
   padding: 1rem 1.2rem 0.85rem;
+}
+
+/* A shift with no status line still holds that row when a neighbor has one, so the pills line up. */
+.shift-pane-body > .status:empty {
+  display: none;
+}
+
+.day-card-shifts:has(.status:not(:empty)) .shift-pane-body > .status:empty {
+  display: block;
+  min-height: 1.7em;
 }
 
 .shift-pane-body h3 {
@@ -1138,6 +1169,25 @@ main a:hover {
 
 .cal-day.is-today .cal-line {
   background: rgb(255 255 255 / 0.45);
+}
+
+.cal-shift.is-ended {
+  position: relative;
+}
+
+.cal-shift.is-ended .cal-line {
+  position: relative;
+}
+
+.cal-shift.is-ended .cal-line::after,
+.cal-shift.is-ended .cal-detail::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  background: rgb(255 255 255 / 0.5);
+  pointer-events: none;
 }
 
 .cal-hold {
@@ -2647,8 +2697,8 @@ button.btn-quiet::before {
 }
 
 .need-pill.is-public {
-  background: #d7ebf8;
-  color: #2d5f86;
+  background: var(--hope-blue-quiet);
+  color: var(--hope-blue-quiet-ink);
   font-weight: 600;
 }
 
@@ -3724,6 +3774,7 @@ button.btn-quiet::before {
   .cal-detail .spots.is-full {
     margin-top: 0.25rem;
   }
+
 }
 
 /* Wider hamburger layout: one even week row, shifts open underneath it. */

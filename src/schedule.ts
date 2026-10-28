@@ -1,7 +1,7 @@
 import { Temporal } from '@js-temporal/polyfill';
 import type Database from 'better-sqlite3';
 import { isWithinSignupWindow } from './signup-window.js';
-import { formatInstantInZone, todayInZone } from './time.js';
+import { formatInstantInZone, localToUtc, todayInZone } from './time.js';
 
 /** Weekday 0 is Sunday, matching the zoned clock. The public sign-up cards use Wednesday. */
 export const WEDNESDAY = 3;
@@ -110,15 +110,17 @@ export function getPublishedEvent(db: Database.Database, slug: string, now: stri
       }
     | undefined;
   if (!event || event.published !== 1) return null;
+  // A shift that already ended stays through the rest of its local day, then leaves at midnight.
+  const todayStart = localToUtc(todayInZone(event.tz, Temporal.Instant.from(now)), '00:00', event.tz);
   const rows = db
     .prepare(
       `SELECT ${SHIFT_COLUMNS}
        ${SHIFT_FROM}
-       WHERE e.id = ? AND s.cancelled = 0 AND s.ends_at_utc > ?
+       WHERE e.id = ? AND s.cancelled = 0 AND (s.ends_at_utc > ? OR s.starts_at_utc >= ?)
        GROUP BY s.id
        ORDER BY s.starts_at_utc, s.role, s.id`,
     )
-    .all(event.id, now) as ShiftRow[];
+    .all(event.id, now, todayStart) as ShiftRow[];
   const names = volunteerNamesByShift(db, rows.map((row) => row.id));
   return {
     id: event.id,

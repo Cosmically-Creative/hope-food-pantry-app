@@ -48,7 +48,8 @@ describe('public pages', () => {
     expect(html).toContain('class="day-card"');
     expect(html).toContain('class="shift-pane"');
     expect(html.match(/class="day-card"/g)).toHaveLength(2);
-    expect(html.match(/class="shift-pane"/g)).toHaveLength(3);
+    expect(html.match(/<section class="shift-pane/g)).toHaveLength(4);
+    expect(html.match(/class="shift-pane is-ended"/g)).toHaveLength(1);
     expect(html).not.toContain('shift-calendar');
     expect(html).not.toContain('Open Sorting');
     expect(html).not.toContain('Full Intake');
@@ -80,7 +81,8 @@ describe('public pages', () => {
     expect(footer).not.toContain('Privacy');
     expect(footer).not.toContain('Coordinator');
     expect(html).not.toContain('Cancelled Distribution');
-    expect(html).not.toContain('Past Setup');
+    expect(html).toContain('Past Setup');
+    expect(html).not.toContain(`href="/s/${ids.past}"`);
     expect(html).not.toContain('Hidden draft');
     expect(html).not.toContain('Secret Person');
     expect(html).not.toContain('secret.person@example.invalid');
@@ -126,6 +128,10 @@ describe('public pages', () => {
     expect(calendar).toContain('1/3 spots filled');
     expect(calendar).toContain('1/1 spots filled');
     expect(calendar).toContain('class="cal-line"');
+    expect(calendar).toContain('Past Setup');
+    expect(calendar).toContain('class="cal-shift is-ended"');
+    expect(calendar).toContain('· Ended');
+    expect(calendar).toContain(`href="/s/${ids.past}"`);
     expect(calendar).toContain('class="cal-hold"');
     expect(calendar).toContain('class="cal-detail"');
     expect(calendar).toContain('>Sun</span>');
@@ -460,6 +466,33 @@ describe('public pages', () => {
     expect(openPane).toContain('data-signup=""');
   });
 
+  it('keeps a finished shift on today and drops that day at midnight', async () => {
+    const { app, db } = await buildApp();
+    const event = db.prepare(`SELECT id AS id FROM events WHERE slug = 'weekly-pantry'`).get() as { id: number };
+    insertShift(db, event.id, 'Yesterday Setup', '2026-10-13', '09:00', '12:00', 2, 0);
+    const html = await (await app.request('/')).text();
+    expect(html).not.toContain('Yesterday Setup');
+    const start = html.indexOf('Past Setup');
+    const pane = html.slice(html.lastIndexOf('<section class="shift-pane is-ended"', start), html.indexOf('</section>', start));
+    expect(pane).toContain('>Ended</span>');
+    expect(pane).toContain('9:00 AM');
+    expect(pane).not.toContain('href=');
+    expect(pane).not.toContain('data-signup');
+    expect(pane).not.toContain('Sign up');
+    const todayCard = html.slice(html.indexOf('aria-current="date"'), html.indexOf('October 21'));
+    expect(todayCard).toContain('Past Setup');
+    expect(todayCard).toContain('Live Greeting');
+    expect(todayCard).toContain('is-ended');
+
+    const { app: nextDay } = await buildApp({ now: '2026-10-15T05:00:00.000Z' });
+    const later = await (await nextDay.request('/')).text();
+    expect(later).not.toContain('Past Setup');
+    expect(later).not.toContain('Live Greeting');
+    expect(later).not.toContain('October 14');
+    expect(later).not.toContain('is-ended');
+    expect(later).toContain('Wednesday Sorting');
+  });
+
   it('shows an empty list when nothing is upcoming', async () => {
     const { app } = await buildApp({ empty: true });
     const html = await (await app.request('/')).text();
@@ -467,7 +500,7 @@ describe('public pages', () => {
   });
 });
 
-async function buildApp(options?: { basePath?: string; empty?: boolean }) {
+async function buildApp(options?: { basePath?: string; empty?: boolean; now?: string }) {
   const dataDir = path.join(mkdtempSync(path.join(tmpdir(), 'hope-volunteer-')), 'data');
   dirs.push(path.dirname(dataDir));
   const config = loadConfig(
@@ -479,7 +512,7 @@ async function buildApp(options?: { basePath?: string; empty?: boolean }) {
   const db = await openAppDatabase(config);
   databases.push(db);
   const ids = options?.empty ? emptyIds() : seedCatalog(db);
-  const app = createApp(config, db, { now: NOW, publicDir: publicDirectory() });
+  const app = createApp(config, db, { now: options?.now ?? NOW, publicDir: publicDirectory() });
   return { app, ids, db, close: () => db.close() };
 }
 

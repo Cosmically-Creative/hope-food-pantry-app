@@ -673,16 +673,20 @@ function ShiftPane(props: { config: AppConfig; shift: PublicShift }) {
   const closed = shift.full || shift.cancelled || shift.ended;
   const action = closed ? 'View shift' : 'Sign up';
   return (
-    <section class="shift-pane">
+    <section class={shift.ended ? 'shift-pane is-ended' : 'shift-pane'}>
       <div class="shift-pane-body">
         <h3>{shift.role}</h3>
         <ShiftWhen shift={shift} />
-        {shift.inProgress ? <p class="status">In progress</p> : null}
+        <p class="status">{shift.inProgress ? 'In progress' : ''}</p>
         <Spots shift={shift} />
         <h4 class="roster-label">Volunteers</h4>
         <RosterNames config={props.config} shiftId={shift.id} names={shift.volunteers} />
       </div>
-      {shift.full ? (
+      {shift.ended ? (
+        <p class="btn-card is-static">
+          <span class="shift-full-label">Ended</span>
+        </p>
+      ) : shift.full ? (
         <p class="btn-card is-static">
           <span class="shift-full-label">Full</span>
           <span>Not accepting more signups</span>
@@ -860,14 +864,16 @@ function CalendarShift(props: { config: AppConfig; shift: PublicShift }) {
   const closed = shift.full || shift.cancelled || shift.ended;
   const action = closed ? 'View shift' : 'Sign up';
   return (
-    <a class="cal-shift" href={appPath(props.config, `/s/${shift.id}`)} data-signup={closed ? undefined : ''}>
+    <a class={shift.ended ? 'cal-shift is-ended' : 'cal-shift'} href={appPath(props.config, `/s/${shift.id}`)} data-signup={closed ? undefined : ''}>
       <span class="cal-line">
         {shift.when.startLabel} {shift.role}
+        {shift.ended ? ' · Ended' : ''}
       </span>
       <span class="sr-only">
         {'. '}
         {action} for {shift.role} on {shift.when.dateLabel}, {shift.when.startLabel} to {shift.when.endLabel}{' '}
         {shift.when.abbreviation}. {spotsSentence(shift)}
+        {shift.ended ? ' Ended.' : ''}
         {shift.inProgress ? ' In progress.' : ''}
         {shift.volunteers.length > 0 ? ` Volunteers: ${shift.volunteers.join(', ')}.` : ' No one signed up yet.'}
       </span>
@@ -880,6 +886,7 @@ function CalendarShift(props: { config: AppConfig; shift: PublicShift }) {
           {shift.when.sameDay ? null : <time dateTime={shift.endsAtUtc}>{shift.when.endDateLabel} </time>}
           <time dateTime={shift.endsAtUtc}>{shift.when.endLabel}</time> {shift.when.abbreviation}
         </span>
+        {shift.ended ? <span class="status">Ended</span> : null}
         {shift.inProgress ? <span class="status">In progress</span> : null}
         <Spots shift={shift} />
         <span class="cal-names">{shift.volunteers.length > 0 ? shift.volunteers.join(', ') : 'No one signed up yet.'}</span>

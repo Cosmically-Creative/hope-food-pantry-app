@@ -1251,7 +1251,7 @@ function ShiftList(props: { config: AppConfig; event: AdminEvent; csrf: string; 
             <details class="help-tip">
               <summary aria-label="About upcoming shifts">?</summary>
               <p>
-                Shifts show on the public list when this event is public, the shift is not cancelled, and it has not ended. Repeating shifts add dates for the next three months. Add weekly shifts fills those dates. Shifts already on the schedule stay as they are, including cancelled ones.
+                Shifts show on the public list when this event is public and the shift is not cancelled. A shift that has already ended stays on today's card, grayed out, until midnight. Then that day leaves the list. Repeating shifts add dates for the next three months. Add weekly shifts fills those dates. Shifts already on the schedule stay as they are, including cancelled ones.
               </p>
             </details>
           </div>
