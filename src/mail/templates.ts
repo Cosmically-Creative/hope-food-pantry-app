@@ -32,6 +32,7 @@ export function renderConfirmation(input: {
     hello: `You are signed up for ${role}.${partyNote(input.groupSize)}`,
     greeting: `Hello ${name},`,
     shift: input.shift,
+    directions: 'Use the south driveway and park in the parking lot for your shift.',
     linkLabel: 'Open this signup',
     linkNote: 'You can cancel or switch this signup from that link. Use the separate link for each signup.',
     manageUrl: input.manageUrl,
@@ -196,6 +197,7 @@ function render(input: {
   greeting: string;
   hello: string;
   shift: MailShift;
+  directions?: string;
   linkLabel: string;
   linkNote: string;
   manageUrl: string;
@@ -211,6 +213,7 @@ function render(input: {
     input.shift.eventTitle,
     when,
     ...(place ? [place] : []),
+    ...(input.directions ? ['', input.directions] : []),
     '',
     `${input.linkLabel}:`,
     input.manageUrl,
@@ -221,6 +224,7 @@ function render(input: {
     'Hope Food Pantry',
   ];
   const htmlPlace = place ? `<br>${escapeHtml(place)}` : '';
+  const htmlDirections = input.directions ? `<p>${escapeHtml(input.directions)}</p>` : '';
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -231,6 +235,7 @@ function render(input: {
 <p>${escapeHtml(input.greeting)}</p>
 <p>${escapeHtml(input.hello)}</p>
 <p>${escapeHtml(input.shift.eventTitle)}<br>${escapeHtml(when)}${htmlPlace}</p>
+${htmlDirections}
 <p><a href="${escapeHtml(input.manageUrl)}" style="color:#222">${escapeHtml(input.linkLabel)}</a></p>
 <p>${escapeHtml(input.linkNote)} Replies go to ${escapeHtml(input.replyTo)}.</p>
 <p>Hope Food Pantry</p>

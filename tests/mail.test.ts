@@ -45,6 +45,8 @@ describe('transactional mail', () => {
     expect(rendered.subject).not.toContain('\n');
     expect(rendered.html).toContain('Pat &lt;script&gt; Review');
     expect(rendered.html).not.toContain('<script>');
+    expect(rendered.text).toContain('Use the south driveway and park in the parking lot for your shift.');
+    expect(rendered.html).toContain('Use the south driveway and park in the parking lot for your shift.');
     expect(rendered.text).toContain('http://127.0.0.1:3000/m/token-value-abcdefghijk');
   });
 

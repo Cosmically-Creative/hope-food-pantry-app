@@ -297,31 +297,56 @@ export function ConfirmationPage(props: {
   groupSize?: number;
   cancelled?: boolean;
 }) {
+  const shift = props.shift;
+  const cancelled = Boolean(props.cancelled);
+  const summary = cancelled
+    ? `${props.name ? `${props.name} is no longer on the ` : 'This signup is no longer for the '}${shift.role} shift.`
+    : `${props.name ? `${props.name} is on the ` : 'This signup is for the '}${shift.role} shift.`;
+  const note = props.managePath
+    ? cancelled
+      ? 'A cancellation email is on the way. The address below still opens this cancelled signup.'
+      : 'A confirmation email is on the way. Save the address below in case the email is late. This browser keeps it for a few minutes. Use it to cancel or switch to a different shift.'
+    : 'If you just signed up, the link stays in this browser for a few minutes. A confirmation email is on the way.';
+  const location = shift.event.location.trim();
   return (
-    <>
-      <h1>{props.cancelled ? 'This signup is cancelled' : "You're signed up"}</h1>
-      <p>
-        {props.cancelled
-          ? `${props.name ? `${props.name} is no longer on the ` : 'This signup is no longer for the '}${props.shift.role} shift.`
-          : `${props.name ? `${props.name} is on the ` : 'This signup is for the '}${props.shift.role} shift.`}
-      </p>
-      {props.groupSize && props.groupSize > 1 ? <p>This signup holds {props.groupSize} spots.</p> : null}
-      <ShiftWhen shift={props.shift} />
-      {props.managePath ? (
-        <>
-          <p>
-            {props.cancelled
-              ? 'A cancellation email is on the way. The address below still opens this cancelled signup.'
-              : 'A confirmation email is on the way. Save the address below in case the email is late. This browser keeps it for a few minutes. Use it to cancel or switch to a different shift.'}
+    <article class={cancelled ? 'receipt is-cancelled' : 'receipt'}>
+      <header class="receipt-head">
+        <span class="receipt-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d={cancelled ? 'M7 7l10 10M17 7 7 17' : 'M5 12.5 9.2 16.7 19 7'} />
+          </svg>
+        </span>
+        <div>
+          <h1>{cancelled ? 'This signup is cancelled' : "You're signed up"}</h1>
+          <p class="receipt-summary">{summary}</p>
+          {props.groupSize && props.groupSize > 1 ? (
+            <p class={cancelled ? 'receipt-hold' : 'spots is-open'}>This signup holds {props.groupSize} spots.</p>
+          ) : null}
+        </div>
+      </header>
+      <section class="receipt-card">
+        <h2 class="receipt-banner">Shift information</h2>
+        <div class="receipt-body">
+          <p class="receipt-role">{shift.role}</p>
+          <p class="receipt-when">
+            <time class="receipt-date" dateTime={shift.when.date}>
+              {shift.when.dateLabel}
+            </time>
+            <span class="receipt-clock">
+              <time dateTime={shift.startsAtUtc}>{shift.when.startLabel}</time>
+              {' to '}
+              {shift.when.sameDay ? null : <time dateTime={shift.endsAtUtc}>{shift.when.endDateLabel} </time>}
+              <time dateTime={shift.endsAtUtc}>{shift.when.endLabel}</time> {shift.when.abbreviation}
+            </span>
           </p>
-          <p class="saved-link">
-            <a href={props.managePath}>{`${props.config.baseUrl}${props.managePath}`}</a>
-          </p>
-        </>
-      ) : (
-        <p>If you just signed up, the link stays in this browser for a few minutes. A confirmation email is on the way.</p>
-      )}
-    </>
+          {location ? <p class="receipt-where">{location}</p> : null}
+          <p class="receipt-note">{note}</p>
+        </div>
+        {props.managePath ? (
+          <a class="receipt-link" href={props.managePath}>{`${props.config.baseUrl}${props.managePath}`}</a>
+        ) : null}
+      </section>
+    </article>
   );
 }
 
