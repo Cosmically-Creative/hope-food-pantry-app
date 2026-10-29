@@ -3,9 +3,7 @@ import type Database from 'better-sqlite3';
 import { isWithinSignupWindow } from './signup-window.js';
 import { formatInstantInZone, localToUtc, todayInZone } from './time.js';
 
-/** Weekday 0 is Sunday, matching the zoned clock. The public sign-up cards use Wednesday. */
-export const WEDNESDAY = 3;
-
+/** Weekday 0 is Sunday, matching the zoned clock. */
 const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
 
 export type PublicShift = {

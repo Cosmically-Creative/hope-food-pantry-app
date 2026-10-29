@@ -47,12 +47,14 @@ describe('public pages', () => {
     expect(html).toContain('No one signed up yet.');
     expect(html).toContain('class="day-card"');
     expect(html).toContain('class="shift-pane"');
-    expect(html.match(/class="day-card"/g)).toHaveLength(2);
-    expect(html.match(/<section class="shift-pane/g)).toHaveLength(4);
+    expect(html.match(/class="day-card"/g)).toHaveLength(4);
+    expect(html.match(/<section class="shift-pane/g)).toHaveLength(6);
     expect(html.match(/class="shift-pane is-ended"/g)).toHaveLength(1);
     expect(html).not.toContain('shift-calendar');
-    expect(html).not.toContain('Open Sorting');
-    expect(html).not.toContain('Full Intake');
+    expect(html).toContain('class="day-card-dow">Thursday');
+    expect(html).toContain('class="day-card-dow">Friday');
+    expect(html).toContain('Open Sorting');
+    expect(html).toContain('Full Intake');
     expect(html).toContain('Today');
     expect(html).toContain('aria-current="date"');
     expect(html).toContain('In progress');
@@ -84,7 +86,7 @@ describe('public pages', () => {
     expect(html).toContain('Past Setup');
     expect(html).not.toContain(`href="/s/${ids.past}"`);
     expect(html).not.toContain('Hidden draft');
-    expect(html).not.toContain('Secret Person');
+    expect(html).toContain('Secret Person');
     expect(html).not.toContain('secret.person@example.invalid');
     expect(html).not.toContain('lane.wednesday@example.invalid');
     expect(html).not.toContain('SECRET-PERSON-NOTE');
@@ -299,7 +301,7 @@ describe('public pages', () => {
     expect(await health.json()).toEqual({ ok: true, database: 'ok' });
   });
 
-  it('shows Wednesday cards by default and one calendar month at a time', async () => {
+  it('shows every shift in the list and one calendar month at a time', async () => {
     const { app, db } = await buildApp();
     const event = db.prepare(`SELECT id AS id FROM events WHERE slug = 'weekly-pantry'`).get() as { id: number };
     insertShift(db, event.id, 'November Sorting', '2026-11-04', '09:00', '12:00', 4, 0);
@@ -310,8 +312,8 @@ describe('public pages', () => {
     expect(html).toContain('Wednesday Sorting');
     expect(html).toContain('November Sorting');
     expect(html).toContain('December Sorting');
-    expect(html).not.toContain('Edge Sorting');
-    expect(html).not.toContain('Open Sorting');
+    expect(html).toContain('Edge Sorting');
+    expect(html).toContain('Open Sorting');
     expect(html).not.toContain('shift-calendar');
     expect(html).not.toContain('Next month');
     expect(home).toContain('href="/?view=calendar"');
@@ -385,7 +387,7 @@ describe('public pages', () => {
     expect(cards).toContain('Window Person');
     expect(cards).not.toContain('window.person@example.invalid');
     expect(cards).not.toContain('WINDOW-NOTE');
-    expect(cards).not.toContain('Deadline Sorting');
+    expect(cards).toContain('Deadline Sorting');
     expect(cards).not.toContain('Later Sorting');
     expect(cards).not.toContain('Spring Sorting');
     expect(cards).toContain('Sign-up is open through January 14, 2027.');

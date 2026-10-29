@@ -1,7 +1,7 @@
 import type { Child } from 'hono/jsx';
 import type { AppConfig } from './config.js';
 import { WEEKDAY_SHORT, calendarMonth, calendarToday, chooseCalendarMonth, monthStep, type CalendarDay } from './calendar.js';
-import { WEDNESDAY, spotsSentence, type PublicEvent, type PublicShift } from './schedule.js';
+import { spotsSentence, type PublicEvent, type PublicShift } from './schedule.js';
 import { SIGNUP_TOO_EARLY, signupDeadlineLabel } from './signup-window.js';
 import { partyChoiceLabel, partyChoices, type SignupErrors, type SignupValues } from './signup-form.js';
 import type { MoveTarget } from './admin/store.js';
@@ -590,7 +590,7 @@ function PublicSchedule(props: {
       {calendarView ? (
         <ShiftCalendar config={props.config} event={props.event} now={props.now} month={props.month} path={props.path} />
       ) : (
-        <WednesdayBoard config={props.config} event={props.event} now={props.now} />
+        <DayBoard config={props.config} event={props.event} now={props.now} />
       )}
       <SignupDialog config={props.config} />
     </div>
@@ -613,16 +613,16 @@ function SignupDialog(props: { config: AppConfig }) {
   );
 }
 
-type WednesdayGroup = {
+type DayGroup = {
   date: string;
   heading: string;
+  weekdayLabel: string;
   shifts: PublicShift[];
 };
 
-function wednesdayGroups(shifts: PublicShift[]): WednesdayGroup[] {
-  const groups: WednesdayGroup[] = [];
+function dayGroups(shifts: PublicShift[]): DayGroup[] {
+  const groups: DayGroup[] = [];
   for (const shift of shifts) {
-    if (shift.when.weekday !== WEDNESDAY) continue;
     const last = groups.at(-1);
     if (last && last.date === shift.when.date) {
       last.shifts.push(shift);
@@ -631,6 +631,7 @@ function wednesdayGroups(shifts: PublicShift[]): WednesdayGroup[] {
       groups.push({
         date: shift.when.date,
         heading: comma === -1 ? shift.when.dateLabel : shift.when.dateLabel.slice(comma + 2),
+        weekdayLabel: shift.when.weekdayLabel,
         shifts: [shift],
       });
     }
@@ -638,11 +639,11 @@ function wednesdayGroups(shifts: PublicShift[]): WednesdayGroup[] {
   return groups;
 }
 
-function WednesdayBoard(props: { config: AppConfig; event: PublicEvent; now: string }) {
+function DayBoard(props: { config: AppConfig; event: PublicEvent; now: string }) {
   const today = calendarToday(props.event.timeZone, props.now);
-  const days = wednesdayGroups(props.event.shifts);
+  const days = dayGroups(props.event.shifts);
   if (days.length === 0) {
-    return <p class="empty">No Wednesday shifts are posted. The calendar lists shifts on other days.</p>;
+    return <p class="empty">No upcoming shifts are posted.</p>;
   }
   return (
     <ol class="day-board">
@@ -650,7 +651,7 @@ function WednesdayBoard(props: { config: AppConfig; event: PublicEvent; now: str
         <li key={day.date}>
           <article class="day-card" aria-current={day.date === today ? 'date' : undefined}>
             <header class="day-card-head">
-              <p class="day-card-dow">Wednesday</p>
+              <p class="day-card-dow">{day.weekdayLabel}</p>
               <h2>
                 <time dateTime={day.date}>{day.heading}</time>
               </h2>
