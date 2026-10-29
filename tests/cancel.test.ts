@@ -5,7 +5,7 @@ import path from 'node:path';
 import { Temporal } from '@js-temporal/polyfill';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
-import { issueCancelToken } from '../src/cancel-token.js';
+import { issueCancelToken, issuePartyToken } from '../src/cancel-token.js';
 import { loadConfig } from '../src/config.js';
 import { openAppDatabase } from '../src/db.js';
 import { issueFormToken } from '../src/form-token.js';
@@ -313,6 +313,155 @@ describe('manage-link switch', () => {
   });
 });
 
+describe('manage-link party size', () => {
+  it('lowers the head count without cancelling and keeps one name', async () => {
+    const { app, db, shiftId } = await buildApp({ capacity: 6 });
+    const saved = await postSignup(app, shiftId, { name: 'Pat Party', email: 'pat.party@example.invalid', partySize: '4' }, '203.0.113.110');
+    const confirmed = await app.request(saved.headers.get('location') ?? '', {
+      headers: { cookie: (saved.headers.get('set-cookie') ?? '').split(';')[0] ?? '' },
+    });
+    const managePath = (await confirmed.text()).match(/href="(\/m\/[^"]+)"/)?.[1] ?? '';
+    const before = db.prepare('SELECT name, group_size, status, manage_token_hash, updated_at FROM signups').get() as {
+      name: string;
+      group_size: number;
+      status: string;
+      manage_token_hash: string;
+      updated_at: string;
+    };
+    db.prepare("UPDATE signups SET updated_at = '2026-10-14T17:00:00.000Z'").run();
+    const viewed = await app.request(managePath);
+    const html = await viewed.text();
+    expect(viewed.status).toBe(200);
+    expect(html).toContain('How many people?');
+    expect(html).toContain('This signup holds that many spots.');
+    expect(html).toContain('You don&#39;t need to add their names.');
+    expect(html).toContain('Change how many people are coming. The signup stays, and the name stays the same.');
+    expect(html).toContain('Save the number of people');
+    expect(partyOptions(html)).toEqual(['1', '2', '3', '4', '5', '6']);
+    expect(html).toContain('<dd>4</dd>');
+    expect(db.prepare('SELECT group_size, updated_at FROM signups').get()).toEqual({
+      group_size: 4,
+      updated_at: '2026-10-14T17:00:00.000Z',
+    });
+
+    const same = await postParty(app, managePath, html, '4');
+    expect(same.status).toBe(303);
+    expect(same.headers.get('location')).toBe(`${managePath}?notice=party`);
+    expect(db.prepare('SELECT group_size, updated_at FROM signups').get()).toEqual({
+      group_size: 4,
+      updated_at: '2026-10-14T17:00:00.000Z',
+    });
+
+    const lowered = await postParty(app, managePath, html, '1');
+    expect(lowered.status).toBe(303);
+    expect(lowered.headers.get('location')).toBe(`${managePath}?notice=party`);
+    const page = await app.request(lowered.headers.get('location') ?? '');
+    const next = await page.text();
+    expect(page.status).toBe(200);
+    expect(next).toContain('The number of people on this signup is saved. The signup stays.');
+    expect(next).toContain('Confirmed');
+    expect(next).toContain('Pat Party');
+    expect(next).toContain('<dd>1</dd>');
+    expect(next).toContain('Cancel this signup');
+    expect(db.prepare('SELECT name, group_size, status, manage_token_hash, updated_at FROM signups').all()).toEqual([{
+      name: 'Pat Party',
+      group_size: 1,
+      status: 'confirmed',
+      manage_token_hash: before.manage_token_hash,
+      updated_at: before.updated_at,
+    }]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM contacts').get()).toEqual({ n: 1 });
+    expect(db.prepare("SELECT kind, status FROM outbox").all()).toEqual([{ kind: 'confirmation', status: 'pending' }]);
+    expect(await (await app.request(`/s/${shiftId}`)).text()).toContain('1/6 spots filled');
+    const board = await (await app.request('/?view=calendar')).text();
+    expect(board).toContain('Pat Party');
+    expect(board).not.toContain('Pat Party (4 people)');
+    expect(board).not.toContain('pat.party@example.invalid');
+  });
+
+  it('does not raise the head count past the spots left or 20', async () => {
+    const tight = await buildApp({ capacity: 4 });
+    const first = await postSignup(tight.app, tight.shiftId, { name: 'Pat Party', email: 'pat.party@example.invalid', partySize: '2' }, '203.0.113.120');
+    const managePath = await managePathFrom(tight.app, first);
+    await postSignup(tight.app, tight.shiftId, { name: 'Sam Other', email: 'sam.other@example.invalid', partySize: '1' }, '203.0.113.121');
+    const html = await (await tight.app.request(managePath)).text();
+    expect(partyOptions(html)).toEqual(['1', '2', '3']);
+    const tooMany = await postParty(tight.app, managePath, html, '4');
+    expect(tooMany.status).toBe(409);
+    expect(await tooMany.text()).toContain('This shift has 1 spot left.');
+    expect(tight.db.prepare("SELECT name, group_size, status FROM signups WHERE email_norm = 'pat.party@example.invalid'").get()).toEqual({
+      name: 'Pat Party',
+      group_size: 2,
+      status: 'confirmed',
+    });
+    const raised = await postParty(tight.app, managePath, html, '3');
+    expect(raised.status).toBe(303);
+    expect(tight.db.prepare('SELECT name, group_size FROM signups ORDER BY id').all()).toEqual([
+      { name: 'Pat Party', group_size: 3 },
+      { name: 'Sam Other', group_size: 1 },
+    ]);
+    expect(await (await tight.app.request(`/s/${tight.shiftId}`)).text()).toContain('4/4 spots filled');
+
+    const wide = await buildApp({ capacity: 25 });
+    const opened = await postSignup(wide.app, wide.shiftId, { name: 'Pat Party', email: 'pat.wide@example.invalid', partySize: '1' }, '203.0.113.122');
+    const widePath = await managePathFrom(wide.app, opened);
+    const wideHtml = await (await wide.app.request(widePath)).text();
+    expect(partyOptions(wideHtml)).toContain('20');
+    expect(partyOptions(wideHtml)).not.toContain('21');
+    const overMax = await postParty(wide.app, widePath, wideHtml, '21');
+    expect(overMax.status).toBe(400);
+    expect(await overMax.text()).toContain('Choose 20 people or fewer.');
+    const zero = await postParty(wide.app, widePath, wideHtml, '0');
+    expect(zero.status).toBe(400);
+    expect(await zero.text()).toContain('Choose how many people are coming.');
+    expect(wide.db.prepare('SELECT group_size, status FROM signups').get()).toEqual({ group_size: 1, status: 'confirmed' });
+    const toTwenty = await postParty(wide.app, widePath, wideHtml, '20');
+    expect(toTwenty.status).toBe(303);
+    expect(wide.db.prepare('SELECT name, group_size, status FROM signups').all()).toEqual([{
+      name: 'Pat Party',
+      group_size: 20,
+      status: 'confirmed',
+    }]);
+    expect(await (await wide.app.request(`/s/${wide.shiftId}`)).text()).toContain('20/25 spots filled');
+  });
+
+  it('refuses a party update that did not come from this signup page', async () => {
+    const { app, db, shiftId } = await buildApp({ capacity: 6 });
+    const saved = await postSignup(app, shiftId, { name: 'Pat Party', email: 'pat.keep@example.invalid', partySize: '3' }, '203.0.113.130');
+    const managePath = await managePathFrom(app, saved);
+    const html = await (await app.request(managePath)).text();
+    const crossSite = await postParty(app, managePath, html, '1', { origin: 'https://evil.example' });
+    expect(crossSite.status).toBe(403);
+    expect(await crossSite.text()).toContain('could not be sent from this page');
+
+    const missing = await postParty(app, managePath, html, '1', { token: '' });
+    expect(missing.status).toBe(400);
+    expect(await missing.text()).toContain('could not be confirmed');
+
+    const tampered = field(html, 'party_token');
+    const bad = await postParty(app, managePath, html, '1', {
+      token: `${tampered.slice(0, -1)}${tampered.endsWith('a') ? 'b' : 'a'}`,
+    });
+    expect(bad.status).toBe(400);
+    const mismatched = await postParty(app, managePath, html, '1', { token: issuePartyToken(SECRET, 'another-manage-token-value') });
+    expect(mismatched.status).toBe(400);
+    expect(db.prepare('SELECT group_size, status FROM signups').get()).toEqual({ group_size: 3, status: 'confirmed' });
+
+    const cancelled = await postCancel(app, managePath, field(html, 'cancel_token'), { ip: '203.0.113.131' });
+    expect(cancelled.status).toBe(303);
+    const gone = await app.request(managePath);
+    expect(await gone.text()).not.toContain('name="party_size"');
+    const again = await postParty(app, managePath, html, '1', { ip: '203.0.113.132' });
+    expect(again.status).toBe(400);
+    expect(await again.text()).toContain('This signup is cancelled');
+    expect(db.prepare('SELECT name, group_size, status FROM signups').all()).toEqual([{
+      name: 'Pat Party',
+      group_size: 3,
+      status: 'cancelled',
+    }]);
+  });
+});
+
 async function buildApp(options?: { capacity?: number }) {
   const root = mkdtempSync(path.join(tmpdir(), 'hope-cancel-'));
   dirs.push(root);
@@ -358,7 +507,7 @@ async function openManage(app: ReturnType<typeof createApp>, shiftId: number, em
 async function postSignup(
   app: ReturnType<typeof createApp>,
   shiftId: number,
-  fields: { name: string; email: string },
+  fields: { name: string; email: string; partySize?: string },
   ip: string,
 ) {
   const body = new URLSearchParams({
@@ -372,6 +521,7 @@ async function postSignup(
     email: fields.email,
     phone: '712-555-0100',
     notes: '',
+    party_size: fields.partySize ?? '',
     company_website: '',
     'cf-turnstile-response': 'widget-token',
   });
@@ -424,6 +574,40 @@ function postSwitch(
 function field(html: string, name: string): string {
   const tag = new RegExp(`<input\\b[^>]*\\bname="${name}"[^>]*>`).exec(html)?.[0] ?? '';
   return /value="([^"]*)"/.exec(tag)?.[1] ?? '';
+}
+
+async function managePathFrom(app: ReturnType<typeof createApp>, saved: Response): Promise<string> {
+  const confirmed = await app.request(saved.headers.get('location') ?? '', {
+    headers: { cookie: (saved.headers.get('set-cookie') ?? '').split(';')[0] ?? '' },
+  });
+  return (await confirmed.text()).match(/href="(\/m\/[^"]+)"/)?.[1] ?? '';
+}
+
+function partyOptions(html: string): string[] {
+  const select = /<select\b[^>]*\bname="party_size"[^>]*>([\s\S]*?)<\/select>/.exec(html)?.[1] ?? '';
+  return [...select.matchAll(/value="(\d+)"/g)].map((match) => match[1] ?? '');
+}
+
+function postParty(
+  app: ReturnType<typeof createApp>,
+  managePath: string,
+  html: string,
+  partySize: string,
+  options?: { origin?: string; token?: string; ip?: string },
+) {
+  const body = new URLSearchParams();
+  const token = options?.token ?? field(html, 'party_token');
+  if (token) body.set('party_token', token);
+  body.set('party_size', partySize);
+  return app.request(`${managePath}/party`, {
+    method: 'POST',
+    headers: {
+      origin: options?.origin ?? 'http://127.0.0.1:3000',
+      'content-type': 'application/x-www-form-urlencoded',
+      'x-test-ip': options?.ip ?? '203.0.113.140',
+    },
+    body,
+  });
 }
 
 function postCancel(

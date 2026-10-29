@@ -98,6 +98,28 @@ export function cancelSignup(db: Database.Database, token: string, now: string, 
   return db.transaction(() => cancelConfirmed(db, hash, token, now, mail)).immediate();
 }
 
+export type PartySizeResult =
+  | { ok: true; groupSize: number; changed: boolean }
+  | { ok: false; reason: 'invalid' | 'cancelled' | 'full'; spotsLeft?: number };
+
+/**
+ * Changes how many spots this one signup holds. The signup stays confirmed, under the same name.
+ * A smaller count frees the difference. A larger count is saved only when the shift still has room
+ * and the new count is within the stored maximum. Saving the current count does not write again.
+ */
+export function changePartySize(db: Database.Database, token: string, groupSize: number, now: string): PartySizeResult {
+  if (!manageTokenShape(token)) return { ok: false, reason: 'invalid' };
+  return db.transaction(() => writePartySize(db, sha256(token), groupSize, now)).immediate();
+}
+
+/** How many people this signup may offer, including the spots it already holds. */
+export function managePartyLimit(db: Database.Database, shiftId: number, groupSize: number): number {
+  const room = partyRoom(db, shiftId, groupSize);
+  const held = Math.min(MAX_PARTY_SIZE, Math.max(1, groupSize));
+  if (!room) return held;
+  return Math.min(MAX_PARTY_SIZE, Math.max(held, room.room));
+}
+
 export function readManageSignup(db: Database.Database, token: string, now: string): ManageView | null {
   if (!manageTokenShape(token)) return null;
   const row = db
@@ -293,6 +315,67 @@ export function confirmedPersonShiftIds(db: Database.Database, emailNorm: string
     )
     .all(emailNorm, name) as Array<{ shift_id: number }>;
   return rows.map((row) => row.shift_id);
+}
+
+function writePartySize(db: Database.Database, hash: string, groupSize: number, now: string): PartySizeResult {
+  const row = db
+    .prepare(
+      `SELECT id AS id, status AS status, token_expires_at AS token_expires_at, anonymized_at AS anonymized_at,
+              shift_id AS shift_id, group_size AS group_size, name AS name
+       FROM signups
+       WHERE manage_token_hash = ?`,
+    )
+    .get(hash) as
+    | {
+        id: number;
+        status: string;
+        token_expires_at: string | null;
+        anonymized_at: string | null;
+        shift_id: number;
+        group_size: number;
+        name: string | null;
+      }
+    | undefined;
+  if (!row || row.anonymized_at || !row.token_expires_at || row.token_expires_at <= now || !row.name) {
+    return { ok: false, reason: 'invalid' };
+  }
+  if (row.status === 'cancelled') return { ok: false, reason: 'cancelled' };
+  if (row.status !== 'confirmed') return { ok: false, reason: 'invalid' };
+  if (!Number.isInteger(groupSize) || groupSize < 1 || groupSize > MAX_PARTY_SIZE) return { ok: false, reason: 'invalid' };
+
+  const current = Number(row.group_size);
+  const room = partyRoom(db, row.shift_id, current);
+  if (!room) return { ok: false, reason: 'invalid' };
+  if (groupSize > current && groupSize > room.room) return { ok: false, reason: 'full', spotsLeft: room.spotsLeft };
+  if (groupSize === current) return { ok: true, groupSize: current, changed: false };
+
+  const updated = db
+    .prepare(
+      `UPDATE signups
+       SET group_size = ?, updated_at = ?
+       WHERE id = ? AND status = 'confirmed' AND anonymized_at IS NULL AND token_expires_at > ? AND group_size = ?`,
+    )
+    .run(groupSize, now, row.id, now, current);
+  if (updated.changes !== 1) return { ok: false, reason: 'invalid' };
+  return { ok: true, groupSize, changed: true };
+}
+
+function partyRoom(
+  db: Database.Database,
+  shiftId: number,
+  groupSize: number,
+): { room: number; spotsLeft: number } | null {
+  const shift = db.prepare('SELECT capacity AS capacity FROM shifts WHERE id = ?').get(shiftId) as { capacity: number } | undefined;
+  if (!shift) return null;
+  const occupied = db
+    .prepare(
+      `SELECT COALESCE(SUM(group_size), 0) AS occupied
+       FROM signups
+       WHERE shift_id = ? AND status = 'confirmed'`,
+    )
+    .get(shiftId) as { occupied: number };
+  const spotsLeft = Math.max(0, Number(shift.capacity) - Number(occupied.occupied));
+  return { room: spotsLeft + groupSize, spotsLeft };
 }
 
 function cancelConfirmed(db: Database.Database, hash: string, token: string, now: string, mail: MailIdentity): CancelResult {

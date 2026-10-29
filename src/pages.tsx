@@ -357,10 +357,19 @@ export type SwitchForm = {
   targets: MoveTarget[];
 };
 
+export type PartyForm = {
+  action: string;
+  token: string;
+  value: string;
+  remaining: number;
+  error?: string;
+};
+
 export function ManagePage(props: {
   signup: ManageView;
   cancel: { action: string; token: string } | null;
   switches: SwitchForm | null;
+  party?: PartyForm | null;
   reminders?: { action: string; token: string } | 'off' | null;
   notice?: string;
   note?: string;
@@ -407,6 +416,14 @@ export function ManagePage(props: {
         <p class="error" role="alert">
           {props.notice}
         </p>
+      ) : null}
+      {props.party ? (
+        <form class="move-form" method="post" action={props.party.action}>
+          <p>Change how many people are coming. The signup stays, and the name stays the same.</p>
+          <input type="hidden" name="party_token" value={props.party.token} />
+          <PartySizeField idPrefix="manage" value={props.party.value} error={props.party.error} remaining={props.party.remaining} />
+          <button type="submit">Save the number of people</button>
+        </form>
       ) : null}
       {props.switches ? (
         props.switches.targets.length === 0 ? (
