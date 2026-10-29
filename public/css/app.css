@@ -2643,15 +2643,17 @@ button.btn-quiet::before {
 
 .desk-panel-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem 1rem;
 }
 
 .desk-panel-aside {
-  margin: 0;
+  margin: 0 0 0 auto;
   color: #7d8b99;
   font-size: 0.92rem;
+  white-space: nowrap;
 }
 
 .desk-panel-head .btn {
@@ -2664,6 +2666,70 @@ button.btn-quiet::before {
 .desk-panel-head .btn:hover,
 .desk-panel-head .btn:active {
   transform: none;
+}
+
+.need-days {
+  display: grid;
+  gap: 1rem 1.15rem;
+  align-items: start;
+}
+
+.need-day {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.need-day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+  padding: 0 0.15rem;
+}
+
+.need-day-head h3 {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 650;
+}
+
+.need-day.is-today .need-day-head h3 {
+  background: var(--hope-yellow);
+  border-radius: 999px;
+  padding: 0.08rem 0.55rem;
+}
+
+.need-day-count {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.need-day-count.is-needs {
+  color: #8a3d36;
+}
+
+.need-day-count.is-open {
+  color: #6a5314;
+}
+
+.need-day .desk-rows {
+  gap: 0.35rem;
+}
+
+.need-day .desk-row {
+  min-height: 3.35rem;
+  padding: 0.48rem 0.75rem;
+}
+
+.need-day .desk-row-main {
+  gap: 0.75rem;
+}
+
+.need-day .desk-row-when {
+  min-width: 4.8rem;
 }
 
 .desk-rows {
@@ -2774,6 +2840,20 @@ button.btn-quiet::before {
   background: #e6e9ee;
   color: #5c6770;
   font-weight: 600;
+}
+
+.need-pill.is-full {
+  background: #e3f6e8;
+  color: #1f7a43;
+}
+
+.need-day .desk-row.is-covered {
+  background: #f3faf5;
+}
+
+.need-day .desk-row.is-covered:hover,
+.need-day .desk-row.is-covered:focus-visible {
+  background: #e5f6eb;
 }
 
 .desk-full {
@@ -2905,6 +2985,10 @@ button.btn-quiet::before {
 @media (min-width: 64rem) {
   .desk-split {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .need-days {
+    grid-template-columns: repeat(auto-fit, minmax(28rem, 1fr));
   }
 }
 
