@@ -234,7 +234,9 @@ export function AdminHome(props: {
         ? 'last'
         : 'custom';
   const openShifts = props.shifts.filter((shift) => !shift.full);
-  const fullShifts = props.shifts.filter((shift) => shift.full);
+  const openDates = new Set(openShifts.map((shift) => shift.date));
+  const dayShifts = props.shifts.filter((shift) => openDates.has(shift.date));
+  const fullOnly = props.shifts.filter((shift) => shift.full && !openDates.has(shift.date));
   return (
     <>
       <header class="desk-intro desk-home-intro">
@@ -263,8 +265,8 @@ export function AdminHome(props: {
             <h2 id="needs-heading">Shifts that need volunteers</h2>
             <p class="desk-panel-aside">Next 2 weeks</p>
           </div>
-          {openShifts.length === 0 ? <p class="empty">No open shifts in the next 2 weeks.</p> : <ShiftNeedList config={props.config} shifts={openShifts} today={clock.date} />}
-          {fullShifts.length > 0 ? <FullShiftNotes shifts={fullShifts} /> : null}
+          {openShifts.length === 0 ? <p class="empty">No open shifts in the next 2 weeks.</p> : <ShiftNeedList config={props.config} shifts={dayShifts} today={clock.date} />}
+          {fullOnly.length > 0 ? <FullShiftNotes shifts={fullOnly} /> : null}
         </section>
         <div class="desk-split">
           <section class="desk-panel" aria-labelledby="events-heading">
@@ -1097,25 +1099,44 @@ function EventList(props: { config: AppConfig; events: HomeEvent[]; today: strin
 
 function ShiftNeedList(props: { config: AppConfig; shifts: HomeShift[]; today: string }) {
   return (
-    <ul class="desk-rows">
-      {props.shifts.map((shift) => {
-        const need = needCopy(shift.occupied, shift.capacity);
+    <div class="need-days">
+      {groupShiftsByDate(props.shifts).map((day) => {
+        const summary = dayOpenLabel(day.shifts);
         return (
-          <li key={shift.id}>
-            <a class="desk-row" href={appPath(props.config, `/admin/shifts/${shift.id}`)}>
-              <span class="desk-row-main">
-                <span class="desk-row-when">{shiftWhen(shift.date, shift.timeLabel, props.today)}</span>
-                <span class="desk-row-copy">
-                  <strong>{shift.role}</strong>
-                  <span>{shift.eventTitle}</span>
-                </span>
-              </span>
-              <span class={need.tone === 'needs' ? 'need-pill is-needs' : 'need-pill is-open'}>{need.text}</span>
-            </a>
-          </li>
+          <section class={day.date === props.today ? 'need-day is-today' : 'need-day'} aria-labelledby={`need-day-${day.date}`} key={day.date}>
+            <div class="need-day-head">
+              <h3 id={`need-day-${day.date}`}>{dayHeading(day.date, props.today)}</h3>
+              <p class={`need-day-count is-${summary.tone}`}>{summary.text}</p>
+            </div>
+            <ul class="desk-rows">
+              {day.shifts.map((shift) => (
+                <NeedShift key={shift.id} config={props.config} shift={shift} today={props.today} />
+              ))}
+            </ul>
+          </section>
         );
       })}
-    </ul>
+    </div>
+  );
+}
+
+function NeedShift(props: { config: AppConfig; shift: HomeShift; today: string }) {
+  const shift = props.shift;
+  const need = shift.full ? { tone: 'full' as const, text: 'Full' } : needCopy(shift.occupied, shift.capacity);
+  const when = shiftWhen(shift.date, shift.timeLabel, props.today);
+  return (
+    <li>
+      <a class={shift.full ? 'desk-row is-covered' : 'desk-row'} href={appPath(props.config, `/admin/shifts/${shift.id}`)} aria-label={`${when}. ${shift.role}. ${shift.eventTitle}. ${need.text}.`}>
+        <span class="desk-row-main">
+          <span class="desk-row-when">{shift.timeLabel}</span>
+          <span class="desk-row-copy">
+            <strong>{shift.role}</strong>
+            <span>{shift.eventTitle}</span>
+          </span>
+        </span>
+        <span class={`need-pill is-${need.tone}`}>{need.text}</span>
+      </a>
+    </li>
   );
 }
 
@@ -1124,14 +1145,53 @@ function FullShiftNotes(props: { shifts: HomeShift[] }) {
     <ul class="desk-full">
       {props.shifts.map((shift) => (
         <li key={shift.id}>
-          <svg class="desk-full-check" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-            <path d="M3.2 8.4 6.4 11.5 12.8 4.8" />
-          </svg>
+          <FullMark />
           {shortDate(shift.date)} {shift.role} is full.
         </li>
       ))}
     </ul>
   );
+}
+
+function FullMark() {
+  return (
+    <svg class="desk-full-check" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M3.2 8.4 6.4 11.5 12.8 4.8" />
+    </svg>
+  );
+}
+
+function groupShiftsByDate(shifts: HomeShift[]): { date: string; shifts: HomeShift[] }[] {
+  const groups: { date: string; shifts: HomeShift[] }[] = [];
+  for (const shift of shifts) {
+    const last = groups.at(-1);
+    if (last?.date === shift.date) last.shifts.push(shift);
+    else groups.push({ date: shift.date, shifts: [shift] });
+  }
+  return groups;
+}
+
+function dayOpenLabel(shifts: HomeShift[]): { text: string; tone: 'open' | 'needs' } {
+  let open = 0;
+  let needs = false;
+  for (const shift of shifts) {
+    if (shift.full) continue;
+    const filled = Math.min(shift.capacity, Math.max(0, shift.occupied));
+    const spots = Math.max(0, shift.capacity - filled);
+    open += spots;
+    if (spots * 2 > shift.capacity) needs = true;
+  }
+  return {
+    tone: needs ? 'needs' : 'open',
+    text: open === 1 ? '1 open' : `${open} open`,
+  };
+}
+
+function dayHeading(date: string, today: string): string {
+  if (date !== today) return shortDate(date);
+  const plain = Temporal.PlainDate.from(date);
+  const month = SHORT_MONTHS[plain.month - 1] ?? 'Month';
+  return `Today, ${month} ${plain.day}`;
 }
 
 function eventSummary(event: HomeEvent, today: string): string {
