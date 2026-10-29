@@ -97,6 +97,26 @@ describe('coordinator sign-in', () => {
     expect(homeHtml).not.toContain('coordinator@example.invalid');
   });
 
+  it('shows the day this sign-in ends, and opening the desk does not move that day', async () => {
+    const { app, db } = await buildApp();
+    const cookie = await signIn(app, db);
+    const home = await app.request('/admin', { headers: { cookie } });
+    expect(await home.text()).toContain('This sign-in ends on Wednesday, October 28, 2026.');
+    expect(db.prepare('SELECT expires_at AS expires_at FROM sessions').get()).toEqual({
+      expires_at: '2026-10-28T18:00:00.000Z',
+    });
+
+    db.prepare('UPDATE sessions SET expires_at = ?, last_seen_at = ?').run('2026-11-05T04:30:00.000Z', '2026-10-20T18:00:00.000Z');
+    const later = await app.request('/admin', { headers: { cookie } });
+    const laterHtml = await later.text();
+    expect(laterHtml).toContain('This sign-in ends on Wednesday, November 4, 2026.');
+    expect(laterHtml).not.toContain('Thursday, November 5, 2026');
+    expect(db.prepare('SELECT expires_at AS expires_at, last_seen_at AS last_seen_at FROM sessions').get()).toEqual({
+      expires_at: '2026-11-05T04:30:00.000Z',
+      last_seen_at: NOW,
+    });
+  });
+
   it('shows a backup from today as a short status tag', async () => {
     const { app, db, config } = await buildApp();
     mkdirSync(path.join(config.dataDir, 'backups'), { recursive: true });

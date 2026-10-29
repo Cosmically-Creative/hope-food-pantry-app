@@ -311,6 +311,7 @@ function showHome(
       backupNote={backup.text}
       backupState={backup.state}
       backupSavedToday={backup.savedToday}
+      sessionEndsAt={session.expiresAt}
       newEvent={newEvent}
     />,
     { account: session, status },

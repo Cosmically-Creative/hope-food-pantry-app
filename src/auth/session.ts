@@ -13,6 +13,7 @@ export type CoordinatorSession = {
   role: 'admin' | 'coordinator';
   csrf: string;
   name: string;
+  expiresAt: string;
 };
 
 type CookieConfig = { basePath: string; secureCookies: boolean };
@@ -50,7 +51,7 @@ export function readSession(db: Database.Database, cookieHeader: string | undefi
   if (!row || row.active !== 1 || row.expires_at <= now) return null;
   if (row.role !== 'admin' && row.role !== 'coordinator') return null;
   db.prepare('UPDATE sessions SET last_seen_at = ? WHERE id_hash = ?').run(now, hash);
-  return { coordinatorId: row.id, role: row.role, csrf: row.csrf, name: row.name };
+  return { coordinatorId: row.id, role: row.role, csrf: row.csrf, name: row.name, expiresAt: row.expires_at };
 }
 
 export function revokeSession(db: Database.Database, cookieHeader: string | undefined): void {

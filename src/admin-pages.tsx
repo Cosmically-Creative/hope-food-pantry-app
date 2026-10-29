@@ -210,6 +210,7 @@ export function AdminHome(props: {
   backupNote: string;
   backupState: 'saved' | 'waiting' | 'behind';
   backupSavedToday: boolean;
+  sessionEndsAt: string;
   newEvent?: { values: EventValues; error?: string };
 }) {
   const draft = props.newEvent?.values ?? {
@@ -221,6 +222,7 @@ export function AdminHome(props: {
     published: false,
   };
   const clock = formatInstantInZone(props.now, props.config.defaultTimeZone);
+  const sessionEnds = formatInstantInZone(props.sessionEndsAt, props.config.defaultTimeZone);
   const thisMonth = monthBounds(clock.date, 0);
   const lastMonth = monthBounds(clock.date, -1);
   const exportFrom = props.exportFrom || thisMonth.from;
@@ -240,7 +242,7 @@ export function AdminHome(props: {
           <h1>Coordinator</h1>
           <p class="desk-date">{clock.dateLabel}</p>
           <p class="desk-signed">
-            Signed in as <strong>{props.name}</strong>.
+            Signed in as <strong>{props.name}</strong>. This sign-in ends on {sessionEnds.dateLabel}.
           </p>
         </div>
         <div class="desk-intro-side">
