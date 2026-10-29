@@ -2715,6 +2715,32 @@ button.btn-quiet::before {
   color: #6a5314;
 }
 
+.need-day-count.is-full {
+  color: #1f7a43;
+}
+
+.event-page .need-pick {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.event-page .need-pick .desk-row {
+  min-width: 0;
+}
+
+.event-page .desk-row.is-ended {
+  background: #eef1f4;
+  color: #6b7784;
+}
+
+.event-page .desk-row.is-ended:hover,
+.event-page .desk-row.is-ended:focus-visible {
+  background: #e4e9ee;
+  color: #6b7784;
+}
+
 .need-day .desk-rows {
   gap: 0.35rem;
 }
@@ -2847,13 +2873,10 @@ button.btn-quiet::before {
   color: #1f7a43;
 }
 
-.need-day .desk-row.is-covered {
-  background: #f3faf5;
-}
-
-.need-day .desk-row.is-covered:hover,
-.need-day .desk-row.is-covered:focus-visible {
-  background: #e5f6eb;
+.desk-row .need-pill,
+.fill-pill {
+  justify-content: center;
+  min-width: 8.75rem;
 }
 
 .desk-full {
@@ -4381,6 +4404,68 @@ main > .crumb,
 .event-panel-tools .pick-all {
   font-size: 0.8rem;
   color: #7d8b99;
+}
+
+.event-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+/* Cancel and Remove sit in the heading row. Showing them stays inside that line, so the shift list does not move down. */
+.event-page .event-panel-head:has(> .event-panel-actions) {
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.event-page .event-panel-head:has(> .event-panel-actions) > :first-child {
+  min-width: 0;
+}
+
+.event-page .event-panel-head > .event-panel-actions {
+  flex: none;
+  flex-wrap: nowrap;
+  align-items: center;
+  margin-left: auto;
+}
+
+.event-page .event-panel-head > .event-panel-tools {
+  flex: none;
+}
+
+.event-page .event-panel-actions .btn {
+  min-height: 2.2rem;
+  padding: 0.2rem 0.9rem;
+  box-shadow: none;
+  font-size: 0.92rem;
+  line-height: 1.2;
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.event-page .event-panel-actions .btn:hover,
+.event-page .event-panel-actions .btn:active {
+  transform: none;
+}
+
+@media (max-width: 42em) {
+  .event-page .event-panel-head:has(> .event-panel-actions) {
+    flex-wrap: wrap;
+  }
+
+  .event-page .event-panel-head:has(> .event-panel-actions) > :first-child {
+    flex: 1 1 auto;
+  }
+
+  .event-page .event-panel-head > .event-panel-actions {
+    flex: 1 1 100%;
+    order: 3;
+    justify-content: flex-end;
+    margin-left: 0;
+    min-height: 2.2rem;
+  }
 }
 
 .event-panel-note {

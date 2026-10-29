@@ -17,6 +17,7 @@ import {
 import {
   addWalkIn,
   cancelShift,
+  cancelShifts,
   cancelSignupAsCoordinator,
   createEvent,
   createShift,
@@ -106,7 +107,6 @@ import {
   type SettingsErrors,
   type SettingsForm,
 } from './settings.js';
-import { expandTemplates } from './recurrence.js';
 import { Layout } from './pages.js';
 import { EMPTY_SIGNUP, parseSignupForm, spotsLeftMessage, type SignupValues } from './signup-form.js';
 import { confirmedPersonOnShift } from './signup.js';
@@ -164,7 +164,6 @@ export function registerAdmin(app: Hono, services: AdminServices): void {
   app.get(appPath(config, '/admin/events/:id'), (c) => showEvent(c, services));
   app.post(appPath(config, '/admin/events/:id/export'), (c) => submitExportEvent(c, services));
   app.post(appPath(config, '/admin/events/:id'), (c) => submitEvent(c, services));
-  app.post(appPath(config, '/admin/events/:id/generate'), (c) => generateWeeklyShifts(c, services));
   app.get(appPath(config, '/admin/events/:id/templates/new'), (c) => showNewTemplate(c, services));
   app.post(appPath(config, '/admin/events/:id/templates'), (c) => submitNewTemplate(c, services));
   app.get(appPath(config, '/admin/events/:id/templates/:templateId'), (c) => showTemplate(c, services));
@@ -174,6 +173,7 @@ export function registerAdmin(app: Hono, services: AdminServices): void {
   app.post(appPath(config, '/admin/events/:id/templates/:templateId/remove'), (c) => submitRemoveTemplate(c, services));
   app.post(appPath(config, '/admin/events/:id/templates/:templateId'), (c) => submitTemplate(c, services));
   app.get(appPath(config, '/admin/events/:id/shifts/new'), (c) => showNewShift(c, services));
+  app.post(appPath(config, '/admin/events/:id/shifts/cancel'), (c) => submitCancelShifts(c, services));
   app.post(appPath(config, '/admin/events/:id/shifts/remove'), (c) => submitRemoveShifts(c, services));
   app.post(appPath(config, '/admin/events/:id/shifts'), (c) => submitNewShift(c, services));
   app.get(appPath(config, '/admin/shifts/:id'), (c) => showShift(c, services));
@@ -761,6 +761,8 @@ function showEvent(
   status: 200 | 400 | 403 = 200,
   confirm?: ConfirmPrompt,
   eventId = idFrom(c),
+  scheduleNote?: string,
+  notice?: string,
 ) {
   const session = requireSession(c, services);
   if (session instanceof Response) return session;
@@ -785,56 +787,14 @@ function showEvent(
       }}
       event={event}
       error={error}
-      notice={knownNotice(c.req.query('notice'))}
+      notice={notice ?? knownNotice(c.req.query('notice'))}
+      generateNote={scheduleNote}
       now={services.now()}
       submitLabel="Save event"
       confirm={confirm}
     />,
     { account: session, status },
   );
-}
-
-async function generateWeeklyShifts(c: Context, services: AdminServices): Promise<Response> {
-  const session = await postedSession(c, services);
-  if (session instanceof Response) return session;
-  const id = idFrom(c);
-  const event = getAdminEvent(services.db, id);
-  if (!event) return missing(c, services);
-  try {
-    const result = expandTemplates(services.db, services.now(), { eventId: id, coordinatorId: session.coordinatorId });
-    if (result.templates === 0) {
-      return c.redirect(appPath(services.config, `/admin/events/${id}?notice=no-template`), 303);
-    }
-    if (result.skipped.length > 0) {
-      return html(
-        c,
-        services,
-        `${event.title} · Hope Volunteer`,
-        <EventEditor
-          config={services.config}
-          heading={event.title}
-          action={appPath(services.config, `/admin/events/${event.id}`)}
-          csrf={session.csrf}
-          values={{
-            title: event.title,
-            slug: event.slug,
-            description: event.description,
-            location: event.location,
-            tz: event.tz,
-            published: event.published,
-          }}
-          event={getAdminEvent(services.db, id) ?? event}
-          generateNote={result.skipped.join(' ')}
-          now={services.now()}
-          submitLabel="Save event"
-        />,
-        { account: session, status: 200 },
-      );
-    }
-    return c.redirect(appPath(services.config, `/admin/events/${id}?notice=generated`), 303);
-  } catch (err) {
-    return saveFailed(c, services, session, err);
-  }
 }
 
 async function submitEvent(c: Context, services: AdminServices): Promise<Response> {
@@ -887,7 +847,7 @@ async function submitNewTemplate(c: Context, services: AdminServices): Promise<R
   try {
     const saved = createTemplate(services.db, session.coordinatorId, eventId, parsed.value, services.now());
     if (!saved.ok) return showNewTemplate(c, services, values, saved.error, 400);
-    return c.redirect(appPath(services.config, `/admin/events/${eventId}?notice=template-saved`), 303);
+    return templateSaved(c, services, eventId, saved);
   } catch (err) {
     return saveFailed(c, services, session, err);
   }
@@ -930,6 +890,19 @@ function showTemplate(c: Context, services: AdminServices, values?: TemplateValu
   );
 }
 
+function templateSaved(
+  c: Context,
+  services: AdminServices,
+  eventId: number,
+  saved: { mailed: number; skipped?: string[] },
+): Response {
+  const notice = saved.mailed > 0 ? 'template-saved-mailed' : 'template-saved';
+  if (saved.skipped && saved.skipped.length > 0) {
+    return showEvent(c, services, undefined, 200, undefined, eventId, saved.skipped.join(' '), notice);
+  }
+  return c.redirect(appPath(services.config, `/admin/events/${eventId}?notice=${notice}`), 303);
+}
+
 async function submitTemplate(c: Context, services: AdminServices): Promise<Response> {
   const session = await postedSession(c, services);
   if (session instanceof Response) return session;
@@ -939,9 +912,17 @@ async function submitTemplate(c: Context, services: AdminServices): Promise<Resp
   const parsed = parseTemplate(values);
   if (!parsed.ok) return showTemplate(c, services, values, parsed.error, 400);
   try {
-    const saved = updateTemplate(services.db, session.coordinatorId, eventId, templateId, parsed.value, services.now());
+    const saved = updateTemplate(
+      services.db,
+      session.coordinatorId,
+      eventId,
+      templateId,
+      parsed.value,
+      services.now(),
+      mailIdentity(services.db, services.config),
+    );
     if (!saved.ok) return showTemplate(c, services, values, saved.error, 400);
-    return c.redirect(appPath(services.config, `/admin/events/${eventId}?notice=template-saved`), 303);
+    return templateSaved(c, services, eventId, saved);
   } catch (err) {
     return saveFailed(c, services, session, err);
   }
@@ -971,9 +952,17 @@ async function submitEndTemplate(c: Context, services: AdminServices): Promise<R
   const eventId = idFrom(c);
   const templateId = templateIdFrom(c);
   try {
-    const ended = endTemplate(services.db, session.coordinatorId, eventId, templateId, services.now());
+    const ended = endTemplate(
+      services.db,
+      session.coordinatorId,
+      eventId,
+      templateId,
+      services.now(),
+      mailIdentity(services.db, services.config),
+    );
     if (!ended.ok) return missing(c, services);
-    return c.redirect(appPath(services.config, `/admin/events/${eventId}?notice=template-ended`), 303);
+    const notice = ended.mailed > 0 ? 'template-ended-mailed' : 'template-ended';
+    return c.redirect(appPath(services.config, `/admin/events/${eventId}?notice=${notice}`), 303);
   } catch (err) {
     return saveFailed(c, services, session, err);
   }
@@ -1043,6 +1032,52 @@ async function submitRemoveTemplate(c: Context, services: AdminServices): Promis
       return showRemoveTemplate(c, services, removed.error, 400);
     }
     return c.redirect(appPath(services.config, `/admin/events/${eventId}?notice=template-removed`), 303);
+  } catch (err) {
+    return saveFailed(c, services, session, err);
+  }
+}
+
+function showCancelShifts(c: Context, services: AdminServices, error: string, status: 200 | 400 | 403 = 400) {
+  return showEvent(
+    c,
+    services,
+    undefined,
+    status,
+    {
+      action: appPath(services.config, `/admin/events/${idFrom(c)}/shifts/cancel`),
+      title: 'Cancel selected shifts',
+      body: error,
+    },
+    idFrom(c),
+  );
+}
+
+async function submitCancelShifts(c: Context, services: AdminServices): Promise<Response> {
+  const session = await postedSession(c, services);
+  if (session instanceof Response) return session;
+  const eventId = idFrom(c);
+  if (!getAdminEvent(services.db, eventId)) return missing(c, services);
+  const shiftIds = idList(session.body, 'shift[]');
+  if (!shiftIds) return showCancelShifts(c, services, 'That shift is not available.');
+  try {
+    const result = cancelShifts(
+      services.db,
+      session.coordinatorId,
+      eventId,
+      shiftIds,
+      services.now(),
+      mailIdentity(services.db, services.config),
+    );
+    if (!result.ok) return showCancelShifts(c, services, result.error);
+    const notice =
+      result.mailed > 0
+        ? result.count === 1
+          ? 'shift-cancelled'
+          : 'shifts-cancelled'
+        : result.count === 1
+          ? 'shift-closed'
+          : 'shifts-closed';
+    return c.redirect(appPath(services.config, `/admin/events/${eventId}?notice=${notice}`), 303);
   } catch (err) {
     return saveFailed(c, services, session, err);
   }
@@ -1395,10 +1430,12 @@ async function submitCancelShift(c: Context, services: AdminServices): Promise<R
   if (session instanceof Response) return session;
   const id = idFrom(c);
   try {
+    const shift = getAdminShift(services.db, id);
+    if (!shift) return missing(c, services);
     const result = cancelShift(services.db, session.coordinatorId, id, services.now(), mailIdentity(services.db, services.config));
     if (!result.ok) return missing(c, services);
     const notice = result.already || result.mailed === 0 ? 'shift-closed' : 'shift-cancelled';
-    return c.redirect(appPath(services.config, `/admin/shifts/${id}?notice=${notice}`), 303);
+    return c.redirect(appPath(services.config, `/admin/events/${shift.eventId}?notice=${notice}`), 303);
   } catch (err) {
     return saveFailed(c, services, session, err);
   }
@@ -1581,13 +1618,17 @@ function knownNotice(value: string | undefined): string | undefined {
     value === 'signup-cancelled' ||
     value === 'already-cancelled' ||
     value === 'shift-cancelled' ||
+    value === 'shifts-cancelled' ||
     value === 'shift-closed' ||
+    value === 'shifts-closed' ||
     value === 'walk-in' ||
     value === 'moved' ||
     value === 'generated' ||
     value === 'no-template' ||
     value === 'template-saved' ||
+    value === 'template-saved-mailed' ||
     value === 'template-ended' ||
+    value === 'template-ended-mailed' ||
     value === 'signup-removed' ||
     value === 'signups-removed' ||
     value === 'shift-removed' ||

@@ -33,13 +33,14 @@ type TemplateRow = {
 export function expandTemplates(
   db: Database.Database,
   now: string,
-  options?: { eventId?: number; timeZone?: string; coordinatorId?: number | null },
+  options?: { eventId?: number; templateId?: number; timeZone?: string; coordinatorId?: number | null },
 ): ExpandResult {
   const coordinatorId = options?.coordinatorId ?? null;
   const eventId = options?.eventId;
+  const templateId = options?.templateId;
   const timeZone = options?.timeZone;
   const run = db.transaction((): ExpandResult => {
-    const templates = listTemplates(db, eventId, timeZone);
+    const templates = listTemplates(db, eventId, timeZone, templateId);
     let created = 0;
     const skipped: string[] = [];
     for (const template of templates) {
@@ -52,12 +53,21 @@ export function expandTemplates(
   return run.immediate();
 }
 
-function listTemplates(db: Database.Database, eventId: number | undefined, timeZone: string | undefined): TemplateRow[] {
+function listTemplates(
+  db: Database.Database,
+  eventId: number | undefined,
+  timeZone: string | undefined,
+  templateId: number | undefined,
+): TemplateRow[] {
   const filters = ['t.active = 1'];
   const params: Array<number | string> = [];
   if (eventId !== undefined) {
     filters.push('t.event_id = ?');
     params.push(eventId);
+  }
+  if (templateId !== undefined) {
+    filters.push('t.id = ?');
+    params.push(templateId);
   }
   if (timeZone !== undefined) {
     filters.push('e.tz = ?');

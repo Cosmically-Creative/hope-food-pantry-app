@@ -7,6 +7,7 @@ import { cancelPendingConfirmations, cancelPendingReminders, queueCancellation, 
 import type { MailShift } from '../mail/templates.js';
 import type { MailIdentity } from '../mail/types.js';
 import { confirmedPersonOnShift, confirmedPersonShiftIds, reserveSignup, type ReserveInput, type ReserveResult } from '../signup.js';
+import { expandTemplates } from '../recurrence.js';
 import { isWithinSignupWindow } from '../signup-window.js';
 import { isUniqueConstraint } from '../sqlite-error.js';
 import { addLocalDays, assertSameDayShift, assertValidTimeZone, formatInstantInZone, formatUtc, localShiftToUtc, LocalTimeError, todayInZone } from '../time.js';
@@ -144,7 +145,7 @@ export type MoveTarget = {
   label: string;
 };
 
-type SaveResult = { ok: true; id: number; mailed: number } | { ok: false; error: string };
+type SaveResult = { ok: true; id: number; mailed: number; skipped?: string[] } | { ok: false; error: string };
 type CancelResult = { ok: true; already: boolean; mailed: number } | { ok: false; error: string };
 
 export function listAdminEvents(db: Database.Database): AdminEventSummary[] {
@@ -436,9 +437,10 @@ export function createTemplate(
       .run(eventId, input.role, input.weekday, input.start, input.end, input.capacity, input.startsOn, input.endsOn);
     const id = Number(result.lastInsertRowid);
     writeAudit(db, coordinatorId, 'template.create', { templateId: id, eventId }, now);
-    return id;
+    const filled = expandTemplates(db, now, { eventId, templateId: id, coordinatorId });
+    return { id, skipped: filled.skipped };
   }).immediate();
-  return { ok: true, id: inserted, mailed: 0 };
+  return { ok: true, id: inserted.id, mailed: 0, skipped: inserted.skipped };
 }
 
 export function updateTemplate(
@@ -448,64 +450,209 @@ export function updateTemplate(
   templateId: number,
   input: TemplateInput,
   now: string,
+  mail: MailIdentity,
 ): SaveResult {
   const checked = templateInput(input);
   if (!checked.ok) return checked;
-  return db.transaction((): SaveResult => {
-    const existing = db
-      .prepare(
-        `SELECT role, weekday, start_local, end_local, capacity, starts_on, ends_on, active
-         FROM shift_templates
-         WHERE id = ? AND event_id = ?`,
-      )
-      .get(templateId, eventId) as
-      | {
-          role: string;
-          weekday: number;
-          start_local: string;
-          end_local: string;
-          capacity: number;
-          starts_on: string;
-          ends_on: string | null;
-          active: number;
-        }
-      | undefined;
-    if (!existing) return { ok: false as const, error: 'That weekly template is not available.' };
-    if (existing.active !== 1) return { ok: false as const, error: 'This weekly template has ended.' };
-    const same =
-      existing.role === input.role &&
-      existing.weekday === input.weekday &&
-      existing.start_local === input.start &&
-      existing.end_local === input.end &&
-      Number(existing.capacity) === input.capacity &&
-      existing.starts_on === input.startsOn &&
-      existing.ends_on === input.endsOn;
-    if (same) return { ok: true as const, id: templateId, mailed: 0 };
+  try {
+    return db.transaction((): SaveResult => {
+      const existing = db
+        .prepare(
+          `SELECT t.role AS role, t.weekday AS weekday, t.start_local AS start_local, t.end_local AS end_local,
+                  t.capacity AS capacity, t.starts_on AS starts_on, t.ends_on AS ends_on, t.active AS active, e.tz AS tz
+           FROM shift_templates t
+           JOIN events e ON e.id = t.event_id
+           WHERE t.id = ? AND t.event_id = ?`,
+        )
+        .get(templateId, eventId) as
+        | {
+            role: string;
+            weekday: number;
+            start_local: string;
+            end_local: string;
+            capacity: number;
+            starts_on: string;
+            ends_on: string | null;
+            active: number;
+            tz: string;
+          }
+        | undefined;
+      if (!existing) return { ok: false as const, error: 'That weekly template is not available.' };
+      if (existing.active !== 1) return { ok: false as const, error: 'This weekly template has ended.' };
+      const same =
+        existing.role === input.role &&
+        existing.weekday === input.weekday &&
+        existing.start_local === input.start &&
+        existing.end_local === input.end &&
+        Number(existing.capacity) === input.capacity &&
+        existing.starts_on === input.startsOn &&
+        existing.ends_on === input.endsOn;
+      if (same) {
+        const filled = expandTemplates(db, now, { eventId, templateId, coordinatorId });
+        return { ok: true as const, id: templateId, mailed: 0, skipped: filled.skipped };
+      }
+      const tooSmall = capacityBelowSignups(db, templateId, input, now);
+      if (tooSmall) return { ok: false as const, error: tooSmall };
+      const saved = db
+        .prepare(
+          `UPDATE shift_templates
+           SET role = ?, weekday = ?, start_local = ?, end_local = ?, capacity = ?,
+               starts_on = ?, ends_on = ?, revision = revision + 1
+           WHERE id = ? AND event_id = ? AND active = 1`,
+        )
+        .run(
+          input.role,
+          input.weekday,
+          input.start,
+          input.end,
+          input.capacity,
+          input.startsOn,
+          input.endsOn,
+          templateId,
+          eventId,
+        );
+      if (saved.changes !== 1) return { ok: false as const, error: 'This weekly template has ended.' };
+      const revision = db.prepare('SELECT revision AS revision FROM shift_templates WHERE id = ?').get(templateId) as {
+        revision: number;
+      };
+      const synced = syncTemplateShifts(db, coordinatorId, templateId, input, Number(revision.revision), existing.tz, now, mail);
+      const filled = expandTemplates(db, now, { eventId, templateId, coordinatorId });
+      writeAudit(
+        db,
+        coordinatorId,
+        'template.update',
+        {
+          templateId,
+          eventId,
+          revision: Number(revision.revision),
+          updated: synced.updated,
+          removed: synced.removed,
+          cancelled: synced.cancelled,
+          mailed: synced.mailed,
+        },
+        now,
+      );
+      return { ok: true as const, id: templateId, mailed: synced.mailed, skipped: [...synced.skipped, ...filled.skipped] };
+    }).immediate();
+  } catch (err) {
+    if (err instanceof BatchRemovalError) return { ok: false, error: err.message };
+    throw err;
+  }
+}
+
+type TemplateShiftRow = {
+  id: number;
+  occurrence_date: string;
+  role: string;
+  starts_at_utc: string;
+  ends_at_utc: string;
+  capacity: number;
+  cancelled: number;
+  manually_modified: number;
+};
+
+/** Future shifts from this template follow the saved pattern. A shift edited on its own, a cancelled date, and a shift that already ended stay as they are. */
+function syncTemplateShifts(
+  db: Database.Database,
+  coordinatorId: number,
+  templateId: number,
+  input: TemplateInput,
+  revision: number,
+  tz: string,
+  now: string,
+  mail: MailIdentity,
+): { updated: number; removed: number; cancelled: number; mailed: number; skipped: string[] } {
+  const shifts = db
+    .prepare(
+      `SELECT id AS id, occurrence_date AS occurrence_date, role AS role, starts_at_utc AS starts_at_utc,
+              ends_at_utc AS ends_at_utc, capacity AS capacity, cancelled AS cancelled, manually_modified AS manually_modified
+       FROM shifts
+       WHERE template_id = ?
+       ORDER BY occurrence_date`,
+    )
+    .all(templateId) as TemplateShiftRow[];
+  let updated = 0;
+  let removed = 0;
+  let cancelled = 0;
+  let mailed = 0;
+  const skipped: string[] = [];
+  for (const shift of shifts) {
+    if (shift.ends_at_utc <= now || shift.cancelled === 1 || shift.manually_modified === 1) continue;
+    if (!occurrenceStillMatches(shift.occurrence_date, input)) {
+      const roster = shiftRoster(db, shift.id);
+      if (roster.signups > 0) {
+        const result = cancelOpenShift(db, coordinatorId, shift.id, now, mail);
+        if (!result.ok) throw new BatchRemovalError(result.error);
+        mailed += result.mailed;
+        if (!result.already) cancelled += 1;
+      } else {
+        purgeShift(db, shift.id);
+        removed += 1;
+      }
+      continue;
+    }
+    let times: { startsAtUtc: string; endsAtUtc: string };
+    try {
+      times = localShiftToUtc(shift.occurrence_date, input.start, input.end, tz);
+    } catch (err) {
+      if (err instanceof LocalTimeError) {
+        skipped.push(err.message);
+        continue;
+      }
+      throw err;
+    }
+    const material = shift.role !== input.role || shift.starts_at_utc !== times.startsAtUtc || shift.ends_at_utc !== times.endsAtUtc;
     const saved = db
       .prepare(
-        `UPDATE shift_templates
-         SET role = ?, weekday = ?, start_local = ?, end_local = ?, capacity = ?,
-             starts_on = ?, ends_on = ?, revision = revision + 1
-         WHERE id = ? AND event_id = ? AND active = 1`,
+        `UPDATE shifts
+         SET role = ?, starts_at_utc = ?, ends_at_utc = ?, capacity = ?, template_revision = ?
+         WHERE id = ? AND cancelled = 0 AND manually_modified = 0 AND ends_at_utc > ?`,
       )
-      .run(
-        input.role,
-        input.weekday,
-        input.start,
-        input.end,
-        input.capacity,
-        input.startsOn,
-        input.endsOn,
-        templateId,
-        eventId,
-      );
-    if (saved.changes !== 1) return { ok: false as const, error: 'This weekly template has ended.' };
-    const revision = db.prepare('SELECT revision AS revision FROM shift_templates WHERE id = ?').get(templateId) as {
-      revision: number;
-    };
-    writeAudit(db, coordinatorId, 'template.update', { templateId, eventId, revision: Number(revision.revision) }, now);
-    return { ok: true as const, id: templateId, mailed: 0 };
-  }).immediate();
+      .run(input.role, times.startsAtUtc, times.endsAtUtc, input.capacity, revision, shift.id, now);
+    if (saved.changes !== 1) continue;
+    updated += 1;
+    if (material) mailed += bumpAndNotify(db, shift.id, now, mail, false);
+  }
+  return { updated, removed, cancelled, mailed, skipped };
+}
+
+function capacityBelowSignups(db: Database.Database, templateId: number, input: TemplateInput, now: string): string | null {
+  const shifts = db
+    .prepare(
+      `SELECT id AS id, occurrence_date AS occurrence_date, ends_at_utc AS ends_at_utc,
+              cancelled AS cancelled, manually_modified AS manually_modified
+       FROM shifts
+       WHERE template_id = ?`,
+    )
+    .all(templateId) as Array<Pick<TemplateShiftRow, 'id' | 'occurrence_date' | 'ends_at_utc' | 'cancelled' | 'manually_modified'>>;
+  for (const shift of shifts) {
+    if (shift.ends_at_utc <= now || shift.cancelled === 1 || shift.manually_modified === 1) continue;
+    if (!occurrenceStillMatches(shift.occurrence_date, input)) continue;
+    if (shiftRoster(db, shift.id).occupied > input.capacity) {
+      return 'Capacity cannot be lower than the number of people signed up.';
+    }
+  }
+  return null;
+}
+
+function occurrenceStillMatches(date: string, input: TemplateInput): boolean {
+  const weekday = Temporal.PlainDate.from(date).dayOfWeek % 7;
+  if (weekday !== input.weekday) return false;
+  if (date < input.startsOn) return false;
+  if (input.endsOn !== null && date > input.endsOn) return false;
+  return true;
+}
+
+function shiftRoster(db: Database.Database, shiftId: number): { occupied: number; signups: number } {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(CASE WHEN status = 'confirmed' THEN group_size ELSE 0 END), 0) AS occupied,
+              COUNT(*) AS signups
+       FROM signups
+       WHERE shift_id = ?`,
+    )
+    .get(shiftId) as { occupied: number; signups: number };
+  return { occupied: Number(row.occupied), signups: Number(row.signups) };
 }
 
 export function endTemplate(
@@ -514,20 +661,45 @@ export function endTemplate(
   eventId: number,
   templateId: number,
   now: string,
+  mail: MailIdentity,
 ): CancelResult {
-  return db.transaction((): CancelResult => {
-    const existing = db
-      .prepare('SELECT active AS active FROM shift_templates WHERE id = ? AND event_id = ?')
-      .get(templateId, eventId) as { active: number } | undefined;
-    if (!existing) return { ok: false as const, error: 'That weekly template is not available.' };
-    if (existing.active !== 1) return { ok: true as const, already: true, mailed: 0 };
-    const saved = db
-      .prepare('UPDATE shift_templates SET active = 0 WHERE id = ? AND event_id = ? AND active = 1')
-      .run(templateId, eventId);
-    if (saved.changes !== 1) return { ok: true as const, already: true, mailed: 0 };
-    writeAudit(db, coordinatorId, 'template.end', { templateId, eventId }, now);
-    return { ok: true as const, already: false, mailed: 0 };
-  }).immediate();
+  try {
+    return db.transaction((): CancelResult => {
+      const existing = db
+        .prepare('SELECT active AS active FROM shift_templates WHERE id = ? AND event_id = ?')
+        .get(templateId, eventId) as { active: number } | undefined;
+      if (!existing) return { ok: false as const, error: 'That weekly template is not available.' };
+      if (existing.active !== 1) return { ok: true as const, already: true, mailed: 0 };
+      const saved = db
+        .prepare('UPDATE shift_templates SET active = 0 WHERE id = ? AND event_id = ? AND active = 1')
+        .run(templateId, eventId);
+      if (saved.changes !== 1) return { ok: true as const, already: true, mailed: 0 };
+      const shifts = db
+        .prepare('SELECT id AS id, ends_at_utc AS ends_at_utc, cancelled AS cancelled FROM shifts WHERE template_id = ?')
+        .all(templateId) as { id: number; ends_at_utc: string; cancelled: number }[];
+      let mailed = 0;
+      let removed = 0;
+      let cancelled = 0;
+      for (const shift of shifts) {
+        if (shift.ends_at_utc <= now) {
+          purgeShift(db, shift.id);
+          writeAudit(db, coordinatorId, 'shift.delete', { shiftId: shift.id, eventId, templateId }, now);
+          removed += 1;
+          continue;
+        }
+        if (shift.cancelled === 1) continue;
+        const result = cancelOpenShift(db, coordinatorId, shift.id, now, mail);
+        if (!result.ok) throw new BatchRemovalError(result.error);
+        mailed += result.mailed;
+        if (!result.already) cancelled += 1;
+      }
+      writeAudit(db, coordinatorId, 'template.end', { templateId, eventId, removed, cancelled, mailed }, now);
+      return { ok: true as const, already: false, mailed };
+    }).immediate();
+  } catch (err) {
+    if (err instanceof BatchRemovalError) return { ok: false, error: err.message };
+    throw err;
+  }
 }
 
 export function readSignupRemoval(db: Database.Database, signupId: number): SignupRemoval | null {
@@ -912,20 +1084,78 @@ export function cancelShift(
   now: string,
   mail: MailIdentity,
 ): CancelResult {
-  return db.transaction((): CancelResult => {
-    const shift = db.prepare('SELECT id AS id, cancelled AS cancelled FROM shifts WHERE id = ?').get(id) as
-      | { id: number; cancelled: number }
-      | undefined;
-    if (!shift) return { ok: false, error: 'That shift is not available.' };
-    if (shift.cancelled === 1) return { ok: true, already: true, mailed: 0 };
-    const marked = db
-      .prepare('UPDATE shifts SET cancelled = 1, version = version + 1, manually_modified = 1 WHERE id = ? AND cancelled = 0')
-      .run(id);
-    if (marked.changes !== 1) return { ok: true, already: true, mailed: 0 };
-    const mailed = cancelConfirmedOnShift(db, id, now, mail);
-    writeAudit(db, coordinatorId, 'shift.cancel', { shiftId: id, mailed }, now);
-    return { ok: true, already: false, mailed };
-  }).immediate();
+  return db.transaction((): CancelResult => cancelOpenShift(db, coordinatorId, id, now, mail)).immediate();
+}
+
+export function cancelShifts(
+  db: Database.Database,
+  coordinatorId: number,
+  eventId: number,
+  shiftIds: number[],
+  now: string,
+  mail: MailIdentity,
+): { ok: true; eventId: number; count: number; mailed: number } | { ok: false; error: string } {
+  const ids = [...new Set(shiftIds)];
+  if (ids.length === 0) return { ok: false, error: 'Choose a shift to cancel.' };
+  if (ids.length > BATCH_LIMIT) return { ok: false, error: 'Choose fewer shifts to cancel.' };
+  try {
+    return db
+      .transaction((): { ok: true; eventId: number; count: number; mailed: number } | { ok: false; error: string } => {
+        const rows = ids.map((id) => readCancelTarget(db, id));
+        for (const row of rows) {
+          if (!row || row.eventId !== eventId) return { ok: false, error: 'That shift is not available.' };
+        }
+        for (const row of rows) {
+          if (row && !row.cancelled && row.endsAtUtc <= now) return { ok: false, error: 'That shift has ended.' };
+        }
+        let count = 0;
+        let mailed = 0;
+        for (const row of rows) {
+          if (!row || row.cancelled) continue;
+          const result = cancelOpenShift(db, coordinatorId, row.id, now, mail);
+          if (!result.ok) throw new BatchRemovalError(result.error);
+          if (!result.already) count += 1;
+          mailed += result.mailed;
+        }
+        return { ok: true, eventId, count, mailed };
+      })
+      .immediate();
+  } catch (err) {
+    if (err instanceof BatchRemovalError) return { ok: false, error: err.message };
+    throw err;
+  }
+}
+
+function readCancelTarget(
+  db: Database.Database,
+  shiftId: number,
+): { id: number; eventId: number; endsAtUtc: string; cancelled: boolean } | null {
+  const row = db
+    .prepare('SELECT id AS id, event_id AS event_id, ends_at_utc AS ends_at_utc, cancelled AS cancelled FROM shifts WHERE id = ?')
+    .get(shiftId) as { id: number; event_id: number; ends_at_utc: string; cancelled: number } | undefined;
+  if (!row) return null;
+  return { id: row.id, eventId: row.event_id, endsAtUtc: row.ends_at_utc, cancelled: row.cancelled === 1 };
+}
+
+function cancelOpenShift(
+  db: Database.Database,
+  coordinatorId: number,
+  id: number,
+  now: string,
+  mail: MailIdentity,
+): CancelResult {
+  const shift = db.prepare('SELECT id AS id, cancelled AS cancelled FROM shifts WHERE id = ?').get(id) as
+    | { id: number; cancelled: number }
+    | undefined;
+  if (!shift) return { ok: false, error: 'That shift is not available.' };
+  if (shift.cancelled === 1) return { ok: true, already: true, mailed: 0 };
+  const marked = db
+    .prepare('UPDATE shifts SET cancelled = 1, version = version + 1, manually_modified = 1 WHERE id = ? AND cancelled = 0')
+    .run(id);
+  if (marked.changes !== 1) return { ok: true, already: true, mailed: 0 };
+  const mailed = cancelConfirmedOnShift(db, id, now, mail);
+  writeAudit(db, coordinatorId, 'shift.cancel', { shiftId: id, mailed }, now);
+  return { ok: true, already: false, mailed };
 }
 
 export function cancelSignupAsCoordinator(
@@ -1392,9 +1622,13 @@ export function addWalkIn(
   });
 }
 
-function bumpAndNotify(db: Database.Database, shiftId: number, now: string, mail: MailIdentity): number {
+function bumpAndNotify(db: Database.Database, shiftId: number, now: string, mail: MailIdentity, manual = true): number {
   const bumped = db
-    .prepare('UPDATE shifts SET version = version + 1, manually_modified = 1 WHERE id = ? AND cancelled = 0')
+    .prepare(
+      manual
+        ? 'UPDATE shifts SET version = version + 1, manually_modified = 1 WHERE id = ? AND cancelled = 0'
+        : 'UPDATE shifts SET version = version + 1 WHERE id = ? AND cancelled = 0 AND manually_modified = 0',
+    )
     .run(shiftId);
   if (bumped.changes !== 1) return 0;
   db.prepare(
@@ -1605,6 +1839,20 @@ function deleteShiftMail(db: Database.Database, shiftId: number): void {
         OR signup_id IN (SELECT id FROM signups WHERE shift_id = ?)`,
   ).run(shiftId, shiftId);
   db.prepare('DELETE FROM outbox WHERE shift_id = ?').run(shiftId);
+}
+
+/** Deletes an ended template shift and the roster on it. Pending mail for that shift is dropped. */
+function purgeShift(db: Database.Database, shiftId: number): void {
+  deleteShiftMail(db, shiftId);
+  db.prepare(
+    `DELETE FROM reminders_sent
+     WHERE signup_id IN (SELECT id FROM signups WHERE shift_id = ?)
+        OR outbox_id IN (SELECT id FROM outbox WHERE signup_id IN (SELECT id FROM signups WHERE shift_id = ?))`,
+  ).run(shiftId, shiftId);
+  db.prepare('DELETE FROM outbox WHERE signup_id IN (SELECT id FROM signups WHERE shift_id = ?)').run(shiftId);
+  db.prepare('DELETE FROM signups WHERE shift_id = ?').run(shiftId);
+  const removed = db.prepare('DELETE FROM shifts WHERE id = ?').run(shiftId);
+  if (removed.changes !== 1) throw new BatchRemovalError('That shift is not available.');
 }
 
 function timeZone(tz: string): { ok: true; tz: string } | { ok: false; error: string } {

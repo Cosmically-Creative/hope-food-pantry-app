@@ -44,19 +44,24 @@ const SHIFT_DELETE_BODY = 'This deletes the shift. It does not send email.';
 const SHIFT_PEOPLE_BODY = 'Remove everyone on this roster first.';
 const SHIFT_WAIT_BODY = 'Cancel this shift, or wait until it has ended, before removing it.';
 const SHIFT_WEEKLY_NOTE =
-  'This date came from a weekly template that is still active. Add weekly shifts can put this date back. End that template first if the date should stay gone.';
+  'This date came from a weekly template that is still active. Saving that template puts this date back. End that template first if the date should stay gone.';
 const PERSON_DELETE_BODY = 'This deletes their name, email, phone, and notes from the roster. It does not send email.';
 const PERSON_WAIT_BODY = 'Cancel this signup before removing it.';
 const PERSON_CANCEL_BODY = 'Cancelling a signup emails them. Their old private link stops working, and the email includes a new one.';
-const SHIFT_CANCEL_EMPTY = 'No one is signed up. Cancelling closes the shift and does not send email.';
-const SHIFT_CANCEL_STAY = 'The roster stays. After it is empty, the shift can be removed.';
+const SHIFT_CANCEL_EMPTY = 'No one is signed up. Cancelling closes the shift, takes it off this list, and does not send email.';
+const SHIFT_CANCEL_MANY =
+  'This closes the selected shifts and takes them off this list. A cancellation email is queued for each person who is signed up.';
+const SHIFT_CANCEL_KEEP = 'A template will not add these dates again.';
+const SHIFT_CANCEL_ENDED = 'Those shifts have ended.';
+const SHIFT_CANCEL_PARTIAL = 'Shifts that have ended stay on the list.';
 const SHIFT_ALREADY = 'This shift is already cancelled.';
 const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
-const TEMPLATE_END_BODY = 'Ending it stops later weeks from being added. Shifts already on the schedule stay.';
-const TEMPLATE_ENDED_BODY = 'This weekly template has ended. Shifts already on the schedule stay.';
+const TEMPLATE_END_BODY =
+  'Ending it stops later weeks from being added. Shifts that have not ended are cancelled and leave this list, and a cancellation email is queued for each person signed up. Shifts that already ended are deleted, including the names and emails on those rosters. That part does not send email.';
+const TEMPLATE_ENDED_BODY = 'This template has ended. The shifts it added are off this list.';
 const TEMPLATE_DELETE_BODY =
-  'This deletes the weekly template. Shifts already on the schedule stay. They are no longer tied to this weekly pattern, so later weekly fills will not change them.';
+  'This deletes the template. Any shifts left are no longer tied to this weekly pattern. Cancelled shifts stay off this list.';
 const TEMPLATE_WAIT_BODY = 'End this template before removing it.';
 
 export function shiftRemovalPrompt(
@@ -109,8 +114,7 @@ export function shiftCancelPrompt(shift: { role: string; whenLabel?: string; can
     body:
       confirmed === 0
         ? SHIFT_CANCEL_EMPTY
-        : `This closes the shift. ${confirmed} confirmed ${confirmed === 1 ? 'signup' : 'signups'} will be marked cancelled, and a cancellation email is queued for each.`,
-    note: SHIFT_CANCEL_STAY,
+        : `This closes the shift and takes it off this list. ${confirmed} confirmed ${confirmed === 1 ? 'signup' : 'signups'} will be marked cancelled, and a cancellation email is queued for each.`,
     submit: 'Cancel this shift',
   };
 }
@@ -840,12 +844,12 @@ export function TemplateEditor(props: {
       {props.ended ? (
         <>
           {props.error ? <p class="error">{props.error}</p> : null}
-          <p>This weekly template has ended. Shifts already on the schedule stay.</p>
+          <p>{TEMPLATE_ENDED_BODY}</p>
         </>
       ) : (
         <>
           <p>
-            This repeats one role each week. Saving it does not change shifts already on the schedule. Use Add weekly shifts to fill dates that are not there yet.
+            This repeats one role each week. Saving it updates shifts that have not ended and adds any missing dates for the next three months. A person signed up for a shift that changes gets an email. A date that no longer fits is cancelled when someone is signed up, and removed when nobody is. A shift you edited on its own stays as you saved it. A shift that already ended stays as it was.
           </p>
           <TemplateForm action={props.action} csrf={props.csrf} values={props.values} error={props.error} submitLabel={props.submitLabel} />
         </>
@@ -907,7 +911,7 @@ export function ShiftRoster(props: {
   const confirmed = props.shift.people.filter((person) => person.status === 'confirmed').length;
   const formError = props.shift.cancelled ? undefined : props.editError;
   const bannerError = props.error ?? (props.shift.cancelled ? props.editError : undefined);
-  const detailLine = props.shift.cancelled ? 'Cancelled. The roster stays until you remove it.' : props.shift.whenLabel;
+  const detailLine = props.shift.cancelled ? 'Cancelled. It is off the upcoming list.' : props.shift.whenLabel;
   const walkInOpen = Boolean(
     props.walkIn && (props.walkIn.message || Object.values(props.walkIn.errors).some((message) => Boolean(message))),
   );
@@ -1126,7 +1130,7 @@ function NeedShift(props: { config: AppConfig; shift: HomeShift; today: string }
   const when = shiftWhen(shift.date, shift.timeLabel, props.today);
   return (
     <li>
-      <a class={shift.full ? 'desk-row is-covered' : 'desk-row'} href={appPath(props.config, `/admin/shifts/${shift.id}`)} aria-label={`${when}. ${shift.role}. ${shift.eventTitle}. ${need.text}.`}>
+      <a class="desk-row" href={appPath(props.config, `/admin/shifts/${shift.id}`)} aria-label={`${when}. ${shift.role}. ${shift.eventTitle}. ${need.text}.`}>
         <span class="desk-row-main">
           <span class="desk-row-when">{shift.timeLabel}</span>
           <span class="desk-row-copy">
@@ -1161,8 +1165,8 @@ function FullMark() {
   );
 }
 
-function groupShiftsByDate(shifts: HomeShift[]): { date: string; shifts: HomeShift[] }[] {
-  const groups: { date: string; shifts: HomeShift[] }[] = [];
+function groupShiftsByDate<T extends { date: string }>(shifts: T[]): { date: string; shifts: T[] }[] {
+  const groups: { date: string; shifts: T[] }[] = [];
   for (const shift of shifts) {
     const last = groups.at(-1);
     if (last?.date === shift.date) last.shifts.push(shift);
@@ -1171,16 +1175,19 @@ function groupShiftsByDate(shifts: HomeShift[]): { date: string; shifts: HomeShi
   return groups;
 }
 
-function dayOpenLabel(shifts: HomeShift[]): { text: string; tone: 'open' | 'needs' } {
+function dayOpenLabel(shifts: { capacity: number; occupied: number; ended?: boolean }[]): { text: string; tone: 'open' | 'needs' | 'full' } {
+  const live = shifts.filter((shift) => !shift.ended);
+  if (live.length === 0) return { tone: 'full', text: 'Ended' };
   let open = 0;
   let needs = false;
-  for (const shift of shifts) {
-    if (shift.full) continue;
+  for (const shift of live) {
     const filled = Math.min(shift.capacity, Math.max(0, shift.occupied));
     const spots = Math.max(0, shift.capacity - filled);
+    if (spots === 0) continue;
     open += spots;
     if (spots * 2 > shift.capacity) needs = true;
   }
+  if (open === 0) return { tone: 'full', text: 'Full' };
   return {
     tone: needs ? 'needs' : 'open',
     text: open === 1 ? '1 open' : `${open} open`,
@@ -1307,34 +1314,42 @@ function joinAnd(parts: string[]): string {
 function ShiftList(props: { config: AppConfig; event: AdminEvent; csrf: string; generateNote?: string; now?: string }) {
   const now = props.now;
   const today = now ? todayInZone(props.event.tz, Temporal.Instant.from(now)) : '';
-  const blocks = shiftListBlocks(props.event.shifts, props.event.tz, props.now);
-  const tail = blocks[blocks.length - 1];
-  const footerMore = tail?.kind === 'more' ? tail : undefined;
-  const body = footerMore ? blocks.slice(0, -1) : blocks;
+  const cutoff = today ? addLocalDays(today, DESK_WINDOW_DAYS) : '';
+  const listed = props.event.shifts.filter((shift) => !shift.cancelled);
+  const near = listed.filter((shift) => today !== '' && shift.date >= today && shift.date <= cutoff);
+  const rest = listed.filter((shift) => today === '' || shift.date < today || shift.date > cutoff);
   return (
     <>
       <section class="event-panel" aria-labelledby="shifts-heading">
         <div class="event-panel-head">
-          <div class="event-panel-title">
-            <h2 id="shifts-heading">Upcoming shifts</h2>
-            <details class="help-tip">
-              <summary aria-label="About upcoming shifts">?</summary>
-              <p>
-                Shifts show on the public list when this event is public and the shift is not cancelled. A shift that has already ended stays on today's card, grayed out, until midnight. Then that day leaves the list. Repeating shifts add dates for the next three months. Add weekly shifts fills those dates. Shifts already on the schedule stay as they are, including cancelled ones.
-              </p>
-            </details>
+          <div>
+            <div class="event-panel-title">
+              <h2 id="shifts-heading">Upcoming shifts</h2>
+              <details class="help-tip">
+                <summary aria-label="About upcoming shifts">?</summary>
+                <p>
+                  Shifts show on the public list when this event is public and the shift is not cancelled. A shift that has already ended stays on today's card, grayed out, until midnight. Then that day leaves the list. Saving a template updates shifts that have not ended and adds any missing dates for the next three months. Cancelling a shift takes it off this list. The date stays stored, so the template does not add it again.
+                </p>
+              </details>
+            </div>
+            <p class="event-panel-note">Next 2 weeks</p>
           </div>
-          <div class="event-panel-tools">
-            <a class="btn" href={appPath(props.config, `/admin/events/${props.event.id}/shifts/new`)}>
-              Add a shift
-            </a>
-            {props.event.shifts.length > 1 ? (
-              <label class="pick-all">
-                <input type="checkbox" data-pick-all="shift" />
-                Select all
-              </label>
-            ) : null}
-            {props.event.shifts.length > 0 ? (
+          {listed.length > 0 ? (
+            <div class="event-panel-actions">
+              <MassRemove
+                pick="shift"
+                gate="open"
+                verb="cancelled"
+                blocked={SHIFT_CANCEL_ENDED}
+                partial={SHIFT_CANCEL_PARTIAL}
+                action={appPath(props.config, `/admin/events/${props.event.id}/shifts/cancel`)}
+                title="Cancel selected shifts"
+                body={SHIFT_CANCEL_MANY}
+                submit="Cancel selected"
+                note={SHIFT_CANCEL_KEEP}
+              >
+                Cancel selected
+              </MassRemove>
               <MassRemove
                 pick="shift"
                 action={appPath(props.config, `/admin/events/${props.event.id}/shifts/remove`)}
@@ -1345,45 +1360,106 @@ function ShiftList(props: { config: AppConfig; event: AdminEvent; csrf: string; 
               >
                 Remove selected
               </MassRemove>
+            </div>
+          ) : null}
+          <div class="event-panel-tools">
+            <a class="btn" href={appPath(props.config, `/admin/events/${props.event.id}/shifts/new`)}>
+              Add a shift
+            </a>
+            {listed.length > 1 ? (
+              <label class="pick-all">
+                <input type="checkbox" data-pick-all="shift" />
+                Select all
+              </label>
             ) : null}
           </div>
         </div>
-        {blocks.length === 0 ? (
-          <p class="empty">No shifts yet.</p>
+        {listed.length === 0 ? (
+          <p class="empty">{props.event.shifts.length === 0 ? 'No shifts yet.' : 'No shifts on this list.'}</p>
         ) : (
           <>
-            <ul class="shift-lines">
-              {body.map((block) =>
-                block.kind === 'shift' ? (
-                  <ShiftLine key={block.shift.id} config={props.config} shift={block.shift} now={props.now} today={today} />
-                ) : (
-                  <li key={`more-${block.shifts[0]?.id ?? 'later'}`}>
-                    <ShiftMore config={props.config} shifts={block.shifts} now={props.now} today={today} />
-                  </li>
-                ),
-              )}
-            </ul>
+            {near.length > 0 ? (
+              <EventWindow config={props.config} eventTitle={props.event.title} shifts={near} now={props.now} today={today} />
+            ) : (
+              <p class="empty">No shifts in the next 2 weeks.</p>
+            )}
             <div class="shift-tail">
-              {footerMore ? <ShiftMore config={props.config} shifts={footerMore.shifts} now={props.now} today={today} /> : null}
+              {rest.length > 0 ? <ShiftMore config={props.config} shifts={rest} now={props.now} today={today} /> : null}
               <FillLegend />
             </div>
           </>
         )}
       </section>
-      <WeeklyTemplates config={props.config} event={props.event} csrf={props.csrf} generateNote={props.generateNote} />
+      <WeeklyTemplates config={props.config} event={props.event} generateNote={props.generateNote} />
     </>
   );
 }
 
+function EventWindow(props: { config: AppConfig; eventTitle: string; shifts: AdminShiftSummary[]; now?: string; today: string }) {
+  return (
+    <div class="need-days">
+      {groupShiftsByDate(props.shifts).map((day) => {
+        const summary = dayOpenLabel(day.shifts.map((shift) => ({ ...shift, ended: props.now ? shift.endsAtUtc <= props.now : false })));
+        return (
+          <section class={day.date === props.today ? 'need-day is-today' : 'need-day'} aria-labelledby={`event-day-${day.date}`} key={day.date}>
+            <div class="need-day-head">
+              <h3 id={`event-day-${day.date}`}>{dayHeading(day.date, props.today)}</h3>
+              <p class={`need-day-count is-${summary.tone}`}>{summary.text}</p>
+            </div>
+            <ul class="desk-rows">
+              {day.shifts.map((shift) => (
+                <EventNeedShift key={shift.id} config={props.config} eventTitle={props.eventTitle} shift={shift} now={props.now} today={props.today} />
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function EventNeedShift(props: { config: AppConfig; eventTitle: string; shift: AdminShiftSummary; now?: string; today: string }) {
+  const shift = props.shift;
+  const ended = Boolean(props.now && shift.endsAtUtc <= props.now);
+  const removable = props.now ? shift.cancelled || ended : false;
+  const open = Boolean(props.now && !shift.cancelled && !ended);
+  const time = clockLabel(shift.start);
+  const when = shiftWhen(shift.date, time, props.today);
+  const need = ended ? { tone: 'hidden' as const, text: 'Ended' } : shift.occupied >= shift.capacity ? { tone: 'full' as const, text: 'Full' } : needCopy(shift.occupied, shift.capacity);
+  const rowClass = ended ? 'desk-row is-ended' : 'desk-row';
+  return (
+    <li class="need-pick">
+      <label class="pick">
+        <input
+          type="checkbox"
+          data-pick="shift"
+          data-removable={removable ? 'true' : 'false'}
+          data-open={open ? 'true' : 'false'}
+          value={String(shift.id)}
+          data-weekly={shift.weeklyActive ? 'true' : undefined}
+        />
+        <span class="sr-only">Select {shift.role}</span>
+      </label>
+      <a class={rowClass} href={appPath(props.config, `/admin/shifts/${shift.id}`)} aria-label={`${when}. ${shift.role}. ${props.eventTitle}. ${need.text}.`}>
+        <span class="desk-row-main">
+          <span class="desk-row-when">{time}</span>
+          <span class="desk-row-copy">
+            <strong>{shift.role}</strong>
+            <span>{props.eventTitle}</span>
+          </span>
+        </span>
+        <span class={`need-pill is-${need.tone}`}>{need.text}</span>
+      </a>
+    </li>
+  );
+}
+
 function ShiftMore(props: { config: AppConfig; shifts: AdminShiftSummary[]; now?: string; today: string }) {
-  const count = props.shifts.length;
   return (
     <details class="shift-more">
       <summary>
-        <span class="shift-more-closed">
-          Show {count} more {count === 1 ? 'shift' : 'shifts'}
-        </span>
-        <span class="shift-more-open">Show fewer</span>
+        <span class="shift-more-closed">See more</span>
+        <span class="shift-more-open">See less</span>
       </summary>
       <ul class="shift-lines">
         {props.shifts.map((shift) => (
@@ -1416,6 +1492,7 @@ function FillLegend() {
 function ShiftLine(props: { config: AppConfig; shift: AdminShiftSummary; now?: string; today: string }) {
   const shift = props.shift;
   const removable = props.now ? shift.cancelled || shift.endsAtUtc <= props.now : false;
+  const open = Boolean(props.now && !shift.cancelled && shift.endsAtUtc > props.now);
   const date = shiftDateParts(shift.date);
   const fill = fillStatus(shift);
   return (
@@ -1425,6 +1502,7 @@ function ShiftLine(props: { config: AppConfig; shift: AdminShiftSummary; now?: s
           type="checkbox"
           data-pick="shift"
           data-removable={removable ? 'true' : 'false'}
+          data-open={open ? 'true' : 'false'}
           value={String(shift.id)}
           data-weekly={shift.weeklyActive ? 'true' : undefined}
         />
@@ -1457,64 +1535,21 @@ function FillCheck() {
   );
 }
 
-type ShiftListBlock = { kind: 'shift'; shift: AdminShiftSummary } | { kind: 'more'; shifts: AdminShiftSummary[] };
-
-function shiftListBlocks(shifts: AdminShiftSummary[], timeZone: string, now?: string): ShiftListBlock[] {
-  if (!now) return shifts.map((shift) => ({ kind: 'shift', shift }));
-  const cutoff = addLocalDays(todayInZone(timeZone, Temporal.Instant.from(now)), DESK_WINDOW_DAYS);
-  const blocks: ShiftListBlock[] = [];
-  let later: AdminShiftSummary[] = [];
-  const flush = () => {
-    if (later.length === 0) return;
-    blocks.push({ kind: 'more', shifts: later });
-    later = [];
-  };
-  for (const shift of shifts) {
-    const tucked = !shift.cancelled && shift.endsAtUtc > now && shift.date > cutoff;
-    if (tucked) later.push(shift);
-    else {
-      flush();
-      blocks.push({ kind: 'shift', shift });
-    }
-  }
-  flush();
-  const hasOpenShown = blocks.some((block) => block.kind === 'shift' && !block.shift.cancelled && block.shift.endsAtUtc > now);
-  if (hasOpenShown) return blocks;
-  const moreIndex = blocks.findIndex((block) => block.kind === 'more');
-  const more = blocks[moreIndex];
-  if (!more || more.kind !== 'more') return blocks;
-  const firstDate = more.shifts[0]?.date;
-  const lead = more.shifts.filter((shift) => shift.date === firstDate);
-  more.shifts = more.shifts.filter((shift) => shift.date !== firstDate);
-  const leadBlocks: ShiftListBlock[] = lead.map((shift) => ({ kind: 'shift', shift }));
-  if (more.shifts.length === 0) blocks.splice(moreIndex, 1, ...leadBlocks);
-  else blocks.splice(moreIndex, 0, ...leadBlocks);
-  return blocks;
-}
-
-function WeeklyTemplates(props: { config: AppConfig; event: AdminEvent; csrf: string; generateNote?: string }) {
+function WeeklyTemplates(props: { config: AppConfig; event: AdminEvent; generateNote?: string }) {
   return (
     <section class="event-panel" aria-labelledby="templates-heading">
       <div class="event-panel-head">
         <div>
-          <h2 id="templates-heading">Repeating shifts</h2>
-          <p class="event-panel-note">
-            Each one adds three months ahead.{' '}
-            <button type="submit" class="text-action" form="add-weekly">
-              Add weekly shifts
-            </button>
-          </p>
+          <h2 id="templates-heading">Templates</h2>
+          <p class="event-panel-note">Each one keeps three months of shifts filled.</p>
         </div>
         <a class="btn btn-line" href={appPath(props.config, `/admin/events/${props.event.id}/templates/new`)}>
-          Add a repeating shift
+          Add a template
         </a>
       </div>
-      <form id="add-weekly" method="post" action={appPath(props.config, `/admin/events/${props.event.id}/generate`)} hidden>
-        <input type="hidden" name="csrf" value={props.csrf} />
-      </form>
       {props.generateNote ? <p class="error">{props.generateNote}</p> : null}
       {props.event.templates.length === 0 ? (
-        <p class="empty">No repeating shifts yet.</p>
+        <p class="empty">No templates yet.</p>
       ) : (
         <ul class="repeat-lines">
           {props.event.templates.map((template) => (
@@ -1962,7 +1997,19 @@ function Notice(props: { notice?: string; text?: string }) {
   );
 }
 
-function MassRemove(props: { pick: 'shift' | 'signup'; action: string; title: string; body: string; submit: string; note?: string; children: string }) {
+function MassRemove(props: {
+  pick: 'shift' | 'signup';
+  action: string;
+  title: string;
+  body: string;
+  submit: string;
+  note?: string;
+  gate?: 'open' | 'removable';
+  verb?: string;
+  blocked?: string;
+  partial?: string;
+  children: string;
+}) {
   return (
     <button
       type="button"
@@ -1970,6 +2017,10 @@ function MassRemove(props: { pick: 'shift' | 'signup'; action: string; title: st
       hidden={true}
       data-confirm=""
       data-confirm-pick={props.pick}
+      data-confirm-gate={props.gate}
+      data-confirm-verb={props.verb}
+      data-confirm-blocked={props.blocked}
+      data-confirm-partial={props.partial}
       data-confirm-action={props.action}
       data-confirm-title={props.title}
       data-confirm-body={props.body}
@@ -1995,19 +2046,23 @@ const NOTICES: Record<string, string> = {
   saved: 'Saved.',
   'signup-cancelled': 'The signup is cancelled. A cancellation email is queued.',
   'already-cancelled': 'That signup was already cancelled.',
-  'shift-cancelled': 'The shift is cancelled. Cancellation emails are queued.',
-  'shift-closed': 'The shift is cancelled. No one needed an email.',
+  'shift-cancelled': 'The shift is cancelled and off this list. Cancellation emails are queued.',
+  'shifts-cancelled': 'Those shifts are cancelled and off this list. Cancellation emails are queued.',
+  'shift-closed': 'The shift is cancelled and off this list. No one needed an email.',
+  'shifts-closed': 'Those shifts are cancelled and off this list. No one needed an email.',
   'walk-in': 'They are on this shift. A confirmation email is queued.',
   moved: 'They are on this shift. A change email is queued.',
   generated: 'Weekly shifts for the next three months are on the schedule. Existing shifts were left as they are.',
   'no-template': 'There is no active weekly template.',
-  'template-saved': 'The weekly template is saved. Shifts already on the schedule were not changed.',
-  'template-ended': 'This weekly template has ended. Shifts already on the schedule stay.',
+  'template-saved': 'The template is saved. Shifts that have not ended match it.',
+  'template-saved-mailed': 'The template is saved. Shifts that have not ended match it. Emails are queued for the people those changes affect.',
+  'template-ended': 'This template has ended. The shifts it added are off this list.',
+  'template-ended-mailed': 'This template has ended. The shifts it added are off this list. Cancellation emails are queued.',
   'signup-removed': 'That person is removed from the roster.',
   'signups-removed': 'Those people are removed from the roster.',
   'shift-removed': 'That shift is removed.',
   'shifts-removed': 'Those shifts are removed.',
-  'template-removed': 'That weekly template is removed. Shifts already on the schedule stay, and they are no longer tied to the weekly pattern.',
+  'template-removed': 'That weekly template is removed. Any shifts left are no longer tied to the weekly pattern.',
   'event-removed': 'That event is removed.',
   'settings-saved': 'Settings saved.',
   'admin-added': 'That person can sign in. Ask them to request a sign-in link. This did not send email.',

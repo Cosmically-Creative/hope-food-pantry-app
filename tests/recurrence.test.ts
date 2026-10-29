@@ -131,34 +131,25 @@ describe('weekly template expansion', () => {
   });
 });
 
-describe('add weekly shifts', () => {
-  it('adds from the event page once and refuses a form that is out of date', async () => {
+describe('weekly schedule', () => {
+  it('does not offer a separate button to fill shifts', async () => {
     const { app, db } = await buildApp();
     const eventId = insertEvent(db, 'weekly-pantry', ZONE);
     insertTemplate(db, eventId, { weekday: 3, startsOn: '2026-10-14' });
-    const empty = insertEvent(db, 'plain', ZONE);
     const cookie = await signIn(app, db);
-
-    const missing = await postGenerate(app, eventId, cookie, { csrf: 'wrong' });
-    expect(missing.status).toBe(403);
-    expect(count(db, 'SELECT COUNT(*) AS n FROM shifts')).toBe(0);
-
-    const added = await postGenerate(app, eventId, cookie);
-    expect(added.status).toBe(303);
-    expect(added.headers.get('location')).toBe(`/admin/events/${eventId}?notice=generated`);
-    const page = await app.request(added.headers.get('location') ?? '', { headers: { cookie } });
+    const page = await app.request(`/admin/events/${eventId}`, { headers: { cookie } });
     const html = await page.text();
-    expect(html).toContain('Weekly shifts for the next three months are on the schedule.');
-    expect(html).toContain('Add weekly shifts');
-    expect(count(db, 'SELECT COUNT(*) AS n FROM shifts')).toBe(14);
+    expect(html).toContain('Add a template');
+    expect(html).toContain('Each one keeps three months of shifts filled.');
+    expect(html).not.toContain('Fill missing shifts');
+    expect(html).not.toContain('/generate');
 
-    const repeat = await postGenerate(app, eventId, cookie);
-    expect(repeat.headers.get('location')).toBe(`/admin/events/${eventId}?notice=generated`);
-    expect(count(db, 'SELECT COUNT(*) AS n FROM shifts')).toBe(14);
-    expect(count(db, "SELECT COUNT(*) AS n FROM audit WHERE action = 'template.expand'")).toBe(1);
-
-    const none = await postGenerate(app, empty, cookie);
-    expect(none.headers.get('location')).toBe(`/admin/events/${empty}?notice=no-template`);
+    const generate = await app.request(`/admin/events/${eventId}/generate`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, 'content-type': 'application/x-www-form-urlencoded', cookie },
+      body: new URLSearchParams({ csrf: 'irrelevant' }),
+    });
+    expect(generate.status).toBe(404);
   });
 });
 
@@ -247,23 +238,4 @@ async function signIn(app: Awaited<ReturnType<typeof buildApp>>['app'], db: Awai
   });
   const cookie = /hope_session=([^;]+)/.exec(signedIn.headers.get('set-cookie') ?? '')?.[1] ?? '';
   return `hope_session=${cookie}`;
-}
-
-async function postGenerate(
-  app: Awaited<ReturnType<typeof buildApp>>['app'],
-  eventId: number,
-  cookie: string,
-  options?: { csrf?: string },
-) {
-  const current = await app.request(`/admin/events/${eventId}`, { headers: { cookie } });
-  const csrf = options?.csrf ?? (/name="csrf"[^>]*value="([^"]*)"/.exec(await current.text())?.[1] ?? '');
-  return app.request(`/admin/events/${eventId}/generate`, {
-    method: 'POST',
-    headers: { origin: ORIGIN, 'content-type': 'application/x-www-form-urlencoded', cookie },
-    body: new URLSearchParams({ csrf }),
-  });
-}
-
-function count(db: Awaited<ReturnType<typeof openDb>>, sql: string): number {
-  return Number((db.prepare(sql).get() as { n: number }).n);
 }

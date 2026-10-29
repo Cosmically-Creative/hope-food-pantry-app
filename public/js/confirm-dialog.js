@@ -47,12 +47,17 @@
     }
     var pick = link.getAttribute('data-confirm-pick');
     if (!pick) return;
+    var gate = text(link, 'data-confirm-gate') || 'removable';
+    var flag = gate === 'open' ? 'data-open' : 'data-removable';
+    var verb = text(link, 'data-confirm-verb') || 'removed';
+    var blockedBody = text(link, 'data-confirm-blocked') || 'Cancel this shift, or wait until it has ended, before removing it.';
+    var partialNote = text(link, 'data-confirm-partial') || 'The others stay until they are cancelled or have ended.';
     var chosen = chosenFor(pick);
     var kept = [];
     var blocked = 0;
     var weekly = false;
     chosen.forEach(function (box) {
-      if (box.getAttribute('data-removable') === 'false') {
+      if (box.getAttribute(flag) === 'false') {
         blocked += 1;
         return;
       }
@@ -62,7 +67,7 @@
     var weeklyNote = text(link, 'data-confirm-note-weekly');
     var notes = [];
     if (kept.length === 0 && blocked > 0) {
-      body.textContent = 'Cancel this shift, or wait until it has ended, before removing it.';
+      body.textContent = blockedBody;
       submit.hidden = true;
       submit.disabled = true;
       cancel.textContent = 'Close';
@@ -78,10 +83,10 @@
         input.setAttribute('data-picked', '');
         form.appendChild(input);
       });
-      if (blocked > 0) notes.push('The others stay until they are cancelled or have ended.');
+      if (blocked > 0) notes.push(partialNote);
     }
     if (blocked > 0 && kept.length > 0) {
-      detail.textContent = kept.length + ' of ' + chosen.length + ' can be removed';
+      detail.textContent = kept.length + ' of ' + chosen.length + ' can be ' + verb;
     } else {
       detail.textContent = chosen.length === 1 ? '1 selected' : chosen.length + ' selected';
     }

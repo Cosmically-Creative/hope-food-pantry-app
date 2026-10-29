@@ -380,12 +380,16 @@ describe('coordinator screens', () => {
 
     const closed = await postForm(app, `/admin/shifts/${shiftId}/cancel`, cookie, {});
     expect(closed.status).toBe(303);
+    expect(closed.headers.get('location')).toBe(`/admin/events/${eventId}?notice=shift-cancelled`);
     expect(db.prepare('SELECT cancelled AS cancelled FROM shifts WHERE id = ?').get(shiftId)).toEqual({ cancelled: 1 });
     expect(db.prepare("SELECT status AS status FROM signups WHERE email_norm = 'sam@example.invalid'").get()).toEqual({ status: 'cancelled' });
     expect(count(db, 'SELECT COUNT(*) AS n FROM signups')).toBe(2);
     expect(await (await app.request('/')).text()).not.toContain('Ladle');
+    const eventPage = await (await app.request(closed.headers.get('location') ?? '', { headers: { cookie } })).text();
+    expect(eventPage).toContain('The shift is cancelled and off this list. Cancellation emails are queued.');
+    expect(eventPage).not.toContain('Ladle');
     const closedAdmin = await (await app.request(`/admin/shifts/${shiftId}`, { headers: { cookie } })).text();
-    expect(closedAdmin).toContain('Cancelled. The roster stays until you remove it.');
+    expect(closedAdmin).toContain('Cancelled. It is off the upcoming list.');
     expect(closedAdmin).not.toContain('Edit details');
     expect(closedAdmin).toContain('Remove this shift');
     const closedPage = await (await app.request(`/s/${shiftId}`)).text();
@@ -665,7 +669,7 @@ describe('coordinator screens', () => {
     expect(db.prepare('SELECT status, shift_id FROM signups WHERE id = ?').get(signupId)).toEqual({ status: 'cancelled', shift_id: sourceId });
   });
 
-  it('keeps the next two weeks of shifts in view and tucks later ones under see more', async () => {
+  it('shows the next two weeks as day cards and tucks the rest under see more', async () => {
     const { app, db } = await buildApp();
     const cookie = await signIn(app, db);
     const eventId = await createEvent(app, cookie, 'Pantry', true);
@@ -678,20 +682,22 @@ describe('coordinator screens', () => {
     expect((await postForm(app, `/admin/shifts/${eveningId}/cancel`, cookie, {})).status).toBe(303);
 
     const html = await (await app.request(`/admin/events/${eventId}`, { headers: { cookie } })).text();
-    const moreAt = html.indexOf('Show 2 more shifts');
+    const moreAt = html.indexOf('See more');
     expect(moreAt).toBeGreaterThan(0);
     const before = html.slice(0, moreAt);
     const after = html.slice(moreAt);
-    expect(before).toContain('Morning');
+    expect(before).toContain('need-day');
     expect(before).toContain('Sorting');
     expect(before).toContain('Distribution');
+    expect(before).not.toContain('Morning');
     expect(before).not.toContain('Intake');
     expect(before).not.toContain('Packing');
     expect(before).not.toContain('Evening');
-    expect(after.indexOf('Intake')).toBeGreaterThan(-1);
+    expect(after.indexOf('Morning')).toBeGreaterThan(-1);
+    expect(after.indexOf('Intake')).toBeGreaterThan(after.indexOf('Morning'));
     expect(after.indexOf('Packing')).toBeGreaterThan(after.indexOf('Intake'));
-    expect(after.indexOf('Evening')).toBeGreaterThan(after.indexOf('Packing'));
-    expect(after).toContain('Show fewer');
+    expect(html).not.toContain('Evening');
+    expect(after).toContain('See less');
     expect(html).not.toContain('<details class="shift-more" open');
     expect(count(db, 'SELECT COUNT(*) AS n FROM shifts')).toBe(6);
 
@@ -699,17 +705,72 @@ describe('coordinator screens', () => {
     await addShift(app, cookie, soon, { role: 'Ladle', date: '2026-10-16', capacity: '2' });
     const short = await (await app.request(`/admin/events/${soon}`, { headers: { cookie } })).text();
     expect(short).toContain('Ladle');
-    expect(short).not.toContain('Show 1 more shift');
+    expect(short).toContain('need-day');
+    expect(short).not.toContain('See more');
     expect(short).not.toContain('shift-more');
 
     const distant = await createEvent(app, cookie, 'Holiday', true);
     await addShift(app, cookie, distant, { role: 'Early', date: '2026-11-04', capacity: '2' });
     await addShift(app, cookie, distant, { role: 'Later', date: '2026-11-18', capacity: '2' });
     const far = await (await app.request(`/admin/events/${distant}`, { headers: { cookie } })).text();
-    const farMore = far.indexOf('Show 1 more shift');
+    const farMore = far.indexOf('See more');
     expect(farMore).toBeGreaterThan(0);
-    expect(far.slice(0, farMore)).toContain('Early');
-    expect(far.slice(farMore)).toContain('Later');
+    expect(far.slice(0, farMore)).toContain('No shifts in the next 2 weeks.');
+    expect(far.slice(0, farMore)).not.toContain('Early');
+    expect(far.slice(farMore).indexOf('Later')).toBeGreaterThan(far.slice(farMore).indexOf('Early'));
+  });
+
+  it('cancels the open shifts that are selected and refuses one that has ended', async () => {
+    const { app, db } = await buildApp();
+    const cookie = await signIn(app, db);
+    const eventId = await createEvent(app, cookie, 'Pantry', true);
+    const endedId = await addShift(app, cookie, eventId, { role: 'Morning', date: '2026-10-14', capacity: '2' });
+    const first = await addShift(app, cookie, eventId, { role: 'Sorting', date: '2026-10-21', capacity: '2' });
+    const second = await addShift(app, cookie, eventId, { role: 'Packing', date: '2026-10-22', capacity: '2' });
+    reserve(db, first, 'Bea Example', 'bea@example.invalid', 'bea-operation');
+    const page = await app.request(`/admin/events/${eventId}`, { headers: { cookie } });
+    const html = await page.text();
+    expect(html).toContain('Cancel selected');
+    expect(html).toContain('>Templates<');
+    expect(html).toContain('Add a template');
+    expect(html).toContain('data-confirm-gate="open"');
+    const token = field(html, 'csrf');
+
+    const refused = await app.request(`/admin/events/${eventId}/shifts/cancel`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, 'content-type': 'application/x-www-form-urlencoded', cookie },
+      body: new URLSearchParams([
+        ['csrf', token],
+        ['shift[]', String(endedId)],
+        ['shift[]', String(first)],
+      ]),
+    });
+    expect(refused.status).toBe(400);
+    expect(await refused.text()).toContain('That shift has ended.');
+    expect(db.prepare('SELECT cancelled AS cancelled FROM shifts WHERE id = ?').get(first)).toEqual({ cancelled: 0 });
+    expect(db.prepare('SELECT cancelled AS cancelled FROM shifts WHERE id = ?').get(endedId)).toEqual({ cancelled: 0 });
+
+    const cancelled = await app.request(`/admin/events/${eventId}/shifts/cancel`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, 'content-type': 'application/x-www-form-urlencoded', cookie },
+      body: new URLSearchParams([
+        ['csrf', token],
+        ['shift[]', String(first)],
+        ['shift[]', String(second)],
+      ]),
+    });
+    expect(cancelled.status).toBe(303);
+    expect(cancelled.headers.get('location')).toBe(`/admin/events/${eventId}?notice=shifts-cancelled`);
+    expect(db.prepare('SELECT cancelled AS cancelled FROM shifts WHERE id = ?').get(first)).toEqual({ cancelled: 1 });
+    expect(db.prepare('SELECT cancelled AS cancelled FROM shifts WHERE id = ?').get(second)).toEqual({ cancelled: 1 });
+    expect(db.prepare("SELECT status AS status FROM signups WHERE email_norm = 'bea@example.invalid'").get()).toEqual({ status: 'cancelled' });
+    expect(count(db, "SELECT COUNT(*) AS n FROM outbox WHERE kind = 'cancelled' AND to_email = 'bea@example.invalid' AND status = 'pending'")).toBe(1);
+    const after = await (await app.request(`/admin/events/${eventId}?notice=shifts-cancelled`, { headers: { cookie } })).text();
+    expect(after).toContain('Those shifts are cancelled and off this list. Cancellation emails are queued.');
+    expect(after).toContain('Morning');
+    expect(after).not.toContain('Sorting');
+    expect(after).not.toContain('Packing');
+    expect(count(db, 'SELECT COUNT(*) AS n FROM shifts')).toBe(3);
   });
 
   it('treats an expired session as signed out', async () => {
