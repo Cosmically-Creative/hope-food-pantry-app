@@ -16,6 +16,10 @@ export function issueReminderPageToken(secret: string, manageToken: string): str
   return createHmac('sha256', secret).update(`hope-reminder-page-v1\0${manageToken}`).digest('base64url');
 }
 
+export function issuePartyToken(secret: string, manageToken: string): string {
+  return createHmac('sha256', secret).update(`hope-party-v1\0${manageToken}`).digest('base64url');
+}
+
 export function cancelTokenMatches(secret: string, manageToken: string, received: string): boolean {
   return tokenMatches(issueCancelToken(secret, manageToken), received);
 }
@@ -26,6 +30,10 @@ export function switchTokenMatches(secret: string, manageToken: string, received
 
 export function reminderPageTokenMatches(secret: string, manageToken: string, received: string): boolean {
   return tokenMatches(issueReminderPageToken(secret, manageToken), received);
+}
+
+export function partyTokenMatches(secret: string, manageToken: string, received: string): boolean {
+  return tokenMatches(issuePartyToken(secret, manageToken), received);
 }
 
 function tokenMatches(expected: string, received: string): boolean {

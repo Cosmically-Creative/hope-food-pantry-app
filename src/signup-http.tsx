@@ -6,7 +6,7 @@ import type { Hono } from 'hono';
 import type { Child } from 'hono/jsx';
 import { listMoveTargets, switchSignup } from './admin/store.js';
 import { readSession } from './auth/session.js';
-import { cancelTokenMatches, issueCancelToken, issueReminderPageToken, issueSwitchToken, reminderPageTokenMatches, switchTokenMatches } from './cancel-token.js';
+import { cancelTokenMatches, issueCancelToken, issuePartyToken, issueReminderPageToken, issueSwitchToken, partyTokenMatches, reminderPageTokenMatches, switchTokenMatches } from './cancel-token.js';
 import { clientAddress } from './client-ip.js';
 import { confirmationCookie, openConfirmation, sealConfirmation } from './confirm-cookie.js';
 import type { AppConfig } from './config.js';
@@ -21,16 +21,17 @@ import {
   ShiftPage,
   SwitchAlreadyPage,
   WaitPage,
+  type PartyForm,
   type SignupFormView,
   type SwitchForm,
 } from './pages.js';
 import { recordInvalidManageToken, recordSignupEmail, recordSignupIp, recordSwitchAttempt } from './rate-limit.js';
 import { getPublicShift, type PublicShift } from './schedule.js';
 import { SIGNUP_TOO_EARLY } from './signup-window.js';
-import { EMPTY_SIGNUP, parseSignupForm, spotsLeftMessage, type SignupErrors, type SignupValues } from './signup-form.js';
+import { EMPTY_SIGNUP, parsePartySize, parseSignupForm, spotsLeftMessage, type SignupErrors, type SignupValues } from './signup-form.js';
 import type { MailIdentity } from './mail/types.js';
 import { disableReminders } from './reminders.js';
-import { cancelSignup, confirmedOperationShift, findSignupByOperation, readManageSignup, reserveSignup } from './signup.js';
+import { cancelSignup, changePartySize, confirmedOperationShift, findSignupByOperation, managePartyLimit, readManageSignup, reserveSignup } from './signup.js';
 import { verifyTurnstile, type TurnstileCheck, type TurnstileVerdict } from './turnstile.js';
 import { appPath, cookiePath } from './url.js';
 
@@ -53,6 +54,10 @@ const SWITCH_REJECTED = 'The switch could not be confirmed. Please try again.';
 const SWITCH_UNAVAILABLE = 'The switch could not be saved. Please try again in a little while.';
 const SWITCH_STALE = 'This form is out of date. Submit it again.';
 const SWITCHED_NOTE = 'You are on this shift. This link replaces the earlier one. A change email is queued.';
+const PARTY_ORIGIN = 'The update could not be sent from this page.';
+const PARTY_REJECTED = 'The update could not be confirmed. Please try again.';
+const PARTY_UNAVAILABLE = 'The update could not be saved. Please try again in a little while.';
+const PARTY_NOTE = 'The number of people on this signup is saved. The signup stays.';
 const EXPIRED = 'This form expired. Please submit it again.';
 
 export type SignupServices = {
@@ -99,6 +104,7 @@ export function registerPublicSignup(app: Hono, services: SignupServices): void 
   app.get(appPath(config, '/m/:token'), (c) => showManage(c, services, c.req.param('token') ?? ''));
 
   app.post(appPath(config, '/m/:token/switch'), (c) => submitSwitch(c, services));
+  app.post(appPath(config, '/m/:token/party'), (c) => submitParty(c, services));
   app.post(appPath(config, '/m/:token/reminders'), (c) => submitRemindersOff(c, services));
   app.post(appPath(config, '/m/:token'), (c) => submitCancel(c, services));
 }
@@ -309,7 +315,14 @@ function peerAddress(c: Context, override: SignupServices['clientIp']): string |
   }
 }
 
-function showManage(c: Context, services: SignupServices, token: string, status: 200 | 400 | 403 | 429 | 503 = 200, notice?: string) {
+function showManage(
+  c: Context,
+  services: SignupServices,
+  token: string,
+  status: 200 | 400 | 403 | 409 | 429 | 503 = 200,
+  notice?: string,
+  partyError?: string,
+) {
   const signup = readManageSignup(services.db, token, services.now());
   if (!signup) return missingManage(c, services);
   const note = manageNote(c.req.query('notice'));
@@ -321,6 +334,7 @@ function showManage(c: Context, services: SignupServices, token: string, status:
       signup={signup}
       cancel={cancelForm(services, token, signup.status)}
       switches={switchForm(services, token, signup)}
+      party={partyForm(services, token, signup, partyError)}
       reminders={reminderForm(services, token, signup)}
       notice={notice}
       note={note}
@@ -331,6 +345,7 @@ function showManage(c: Context, services: SignupServices, token: string, status:
 
 function manageNote(notice: string | undefined): string | undefined {
   if (notice === 'switched') return SWITCHED_NOTE;
+  if (notice === 'party') return PARTY_NOTE;
   return undefined;
 }
 
@@ -412,6 +427,56 @@ function switchedAlready(c: Context, services: SignupServices, token: string, bo
   const shiftId = confirmedOperationShift(services.db, formToken.claims.operationId);
   if (shiftId === null) return missingManage(c, services);
   return html(c, services, 'Your signup · Hope Volunteer', <SwitchAlreadyPage />);
+}
+
+function partyForm(
+  services: SignupServices,
+  token: string,
+  signup: { status: 'confirmed' | 'cancelled'; shiftId: number; groupSize: number },
+  error?: string,
+): PartyForm | null {
+  if (signup.status !== 'confirmed') return null;
+  return {
+    action: appPath(services.config, `/m/${token}/party`),
+    token: issuePartyToken(services.config.sessionSecret, token),
+    value: String(signup.groupSize),
+    remaining: managePartyLimit(services.db, signup.shiftId, signup.groupSize),
+    error,
+  };
+}
+
+async function submitParty(c: Context, services: SignupServices): Promise<Response> {
+  const token = c.req.param('token') ?? '';
+  const signup = readManageSignup(services.db, token, services.now());
+  if (!signup) return missingManage(c, services);
+  if (!originAllowed(c, services.config.baseUrl)) {
+    return showManage(c, services, token, 403, PARTY_ORIGIN);
+  }
+  const body = await c.req.parseBody();
+  if (!partyTokenMatches(services.config.sessionSecret, token, textField(body, 'party_token'))) {
+    return showManage(c, services, token, 400, PARTY_REJECTED);
+  }
+  if (signup.status !== 'confirmed') return showManage(c, services, token, 400, 'This signup is cancelled.');
+  const raw = textField(body, 'party_size');
+  const parsed = raw.trim().length === 0
+    ? { ok: false as const, error: 'Choose how many people are coming.' }
+    : parsePartySize(raw);
+  if (!parsed.ok) return showManage(c, services, token, 400, undefined, parsed.error);
+  try {
+    const result = changePartySize(services.db, token, parsed.groupSize, services.now());
+    if (!result.ok && result.reason === 'cancelled') return showManage(c, services, token, 400, 'This signup is cancelled.');
+    if (!result.ok && result.reason === 'full') {
+      const spotsLeft = result.spotsLeft ?? 0;
+      return showManage(c, services, token, 409, undefined, spotsLeft > 0 ? spotsLeftMessage(spotsLeft) : FULL);
+    }
+    if (!result.ok) return showManage(c, services, token, 400, PARTY_REJECTED);
+  } catch (err) {
+    if (!isBusy(err)) throw err;
+    console.error('Head count could not lock the database.');
+    return showManage(c, services, token, 503, PARTY_UNAVAILABLE);
+  }
+  c.header('Cache-Control', 'no-store');
+  return c.redirect(appPath(services.config, `/m/${token}?notice=party`), 303);
 }
 
 function switchForm(services: SignupServices, token: string, signup: { status: 'confirmed' | 'cancelled'; shiftId: number; eventId: number; name: string; email: string; groupSize: number }): SwitchForm | null {

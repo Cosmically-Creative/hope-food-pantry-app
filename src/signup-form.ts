@@ -140,6 +140,16 @@ export function parseSignupForm(
   };
 }
 
+/** The people control. An empty value means one person, the same as a new signup. */
+export function parsePartySize(
+  raw: string,
+  voice: 'volunteer' | 'coordinator' = 'volunteer',
+): { ok: true; groupSize: number } | { ok: false; error: string } {
+  const party = readPartySize(raw, voice);
+  if (party.error) return { ok: false, error: party.error };
+  return { ok: true, groupSize: party.value };
+}
+
 function readPartySize(raw: string, voice: 'volunteer' | 'coordinator'): { value: number; error?: string } {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return { value: 1 };
