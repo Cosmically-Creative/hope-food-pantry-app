@@ -895,7 +895,7 @@ function templateSaved(
   services: AdminServices,
   eventId: number,
   saved: { mailed: number; skipped?: string[] },
-): Response {
+): Response | Promise<Response> {
   const notice = saved.mailed > 0 ? 'template-saved-mailed' : 'template-saved';
   if (saved.skipped && saved.skipped.length > 0) {
     return showEvent(c, services, undefined, 200, undefined, eventId, saved.skipped.join(' '), notice);
