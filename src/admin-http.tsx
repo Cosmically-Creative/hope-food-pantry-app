@@ -726,7 +726,6 @@ function settingsFormFromBody(body: Record<string, unknown>): SettingsForm {
     reminderNear: textField(body, 'reminder_near'),
     replyTo: textField(body, 'reply_to'),
     retentionMonths: textField(body, 'retention_months'),
-    privacyText: textField(body, 'privacy_text'),
   };
 }
 

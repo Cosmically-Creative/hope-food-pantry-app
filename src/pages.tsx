@@ -484,24 +484,6 @@ export function ManagePage(props: {
   );
 }
 
-// TODO(D3): The pantry still has to approve this wording, including retention and copies.
-// A blank setting keeps the unapproved message. Saved wording is shown as written, escaped, and is not a policy by itself.
-export function PrivacyPage(props: { paragraphs: string[] }) {
-  return (
-    <>
-      <h1>Privacy</h1>
-      {props.paragraphs.length === 0 ? (
-        <>
-          <p>Hope Volunteer does not have an approved privacy notice yet.</p>
-          <p>When the pantry approves the wording, it will appear on this page. This page is not a privacy policy.</p>
-        </>
-      ) : (
-        props.paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)
-      )}
-    </>
-  );
-}
-
 export function SwitchAlreadyPage() {
   return (
     <>

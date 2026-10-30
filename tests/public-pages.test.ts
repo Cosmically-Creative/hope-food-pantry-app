@@ -213,16 +213,16 @@ describe('public pages', () => {
     expect(stylesheet).not.toContain('h1.bare');
   });
 
-  it('serves an honest privacy page, a minimal health check, and static assets', async () => {
+  it('leaves /privacy unavailable, and serves a minimal health check and static assets', async () => {
     const { app } = await buildApp();
     const privacy = await app.request('/privacy');
     const privacyHtml = await privacy.text();
-    expect(privacy.status).toBe(200);
+    expect(privacy.status).toBe(404);
+    expect(privacyHtml).toContain('That page is not available');
     expect(privacyHtml).toContain('class="main-nav-link" href="/">Volunteering</a>');
     expect(privacyHtml).not.toContain('aria-current="page"');
-    expect(privacyHtml).toContain('does not have an approved privacy notice yet');
-    expect(privacyHtml).toContain('This page is not a privacy policy.');
-    expect(privacyHtml).not.toContain('24 months');
+    expect(privacyHtml).not.toContain('privacy notice');
+    expect(privacyHtml).not.toContain('privacy policy');
 
     const health = await app.request('/healthz');
     expect(health.status).toBe(200);

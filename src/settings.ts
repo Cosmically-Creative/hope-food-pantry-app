@@ -7,18 +7,15 @@ export const DEFAULT_REMINDER_HOURS = [48, 2] as const;
 export const DEFAULT_RETENTION_MONTHS = 24;
 export const MAX_REMINDER_HOURS = 336;
 export const MAX_RETENTION_MONTHS = 120;
-export const MAX_PRIVACY_TEXT = 8000;
 
 const HOUR_KEY = 'reminder_hours';
 const REPLY_KEY = 'reply_to';
-const PRIVACY_KEY = 'privacy_text';
 const RETENTION_KEY = 'retention_months';
 
 export type PantrySettings = {
   /** Larger hour count first, so the first reminder is the earlier one. */
   reminderHours: readonly [number, number];
   replyTo: string;
-  privacyText: string;
   retentionMonths: number;
 };
 
@@ -27,7 +24,6 @@ export type SettingsForm = {
   reminderNear: string;
   replyTo: string;
   retentionMonths: string;
-  privacyText: string;
 };
 
 export type SettingsErrors = Partial<Record<keyof SettingsForm, string>>;
@@ -40,7 +36,6 @@ export function readPantrySettings(db: Database.Database, fallbackReplyTo: strin
   return {
     reminderHours: storedHours(db),
     replyTo: storedReplyTo(db) ?? fallbackReplyTo,
-    privacyText: storedPrivacy(db),
     retentionMonths: storedRetention(db),
   };
 }
@@ -58,20 +53,12 @@ export function readReplyTo(db: Database.Database, fallback: string): string {
   return storedReplyTo(db) ?? fallback;
 }
 
-export function privacyParagraphs(text: string): string[] {
-  return text
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-}
-
 export function settingsFormFrom(settings: PantrySettings): SettingsForm {
   return {
     reminderFar: String(settings.reminderHours[0]),
     reminderNear: String(settings.reminderHours[1]),
     replyTo: settings.replyTo,
     retentionMonths: String(settings.retentionMonths),
-    privacyText: settings.privacyText,
   };
 }
 
@@ -79,18 +66,16 @@ export function parseSettingsForm(input: SettingsForm): { ok: true; value: Pantr
   const errors: SettingsErrors = {};
   const earlier = parseHour(input.reminderFar);
   const closer = parseHour(input.reminderNear);
-  if (earlier === null) errors.reminderFar = `Enter a whole number of hours from 1 to ${MAX_REMINDER_HOURS}.`;
-  if (closer === null) errors.reminderNear = `Enter a whole number of hours from 1 to ${MAX_REMINDER_HOURS}.`;
+  if (earlier === null) errors.reminderFar = 'Choose when the first reminder goes out.';
+  if (closer === null) errors.reminderNear = 'Choose when the second reminder goes out.';
   if (earlier !== null && closer !== null && earlier === closer) {
-    errors.reminderNear = 'The two reminder times have to be different.';
+    errors.reminderNear = 'Choose two different times.';
   }
   const reply = parseReply(input.replyTo);
   if (!reply.ok) errors.replyTo = reply.error;
   const months = parseMonths(input.retentionMonths);
-  if (months === null) errors.retentionMonths = `Enter a whole number of months from 1 to ${MAX_RETENTION_MONTHS}.`;
-  const privacy = parsePrivacy(input.privacyText);
-  if (!privacy.ok) errors.privacyText = privacy.error;
-  if (earlier === null || closer === null || earlier === closer || !reply.ok || months === null || !privacy.ok) {
+  if (months === null) errors.retentionMonths = 'Choose how long to keep signup details.';
+  if (earlier === null || closer === null || earlier === closer || !reply.ok || months === null) {
     return { ok: false, errors };
   }
   const reminderHours: [number, number] = earlier > closer ? [earlier, closer] : [closer, earlier];
@@ -99,15 +84,14 @@ export function parseSettingsForm(input: SettingsForm): { ok: true; value: Pantr
     value: {
       reminderHours,
       replyTo: reply.value,
-      privacyText: privacy.value,
       retentionMonths: months,
     },
   };
 }
 
 /**
- * Saves the four coordinator settings. Retention is stored only.
- * This does not anonymize signups, and it does not change mail that is already queued.
+ * Saves reminder times, the reply address, and how long signup details are kept.
+ * This does not remove signup details, and it does not change mail that is already queued.
  */
 export function savePantrySettings(
   db: Database.Database,
@@ -116,16 +100,15 @@ export function savePantrySettings(
   fallbackReplyTo: string,
   now: string,
 ): { changed: boolean } {
+  db.prepare(`DELETE FROM settings WHERE key = 'privacy_text'`).run();
   const current = readPantrySettings(db, fallbackReplyTo);
   const replyChanged = current.replyTo !== next.replyTo;
-  const privacyChanged = current.privacyText !== next.privacyText;
   const hoursChanged = current.reminderHours[0] !== next.reminderHours[0] || current.reminderHours[1] !== next.reminderHours[1];
   const retentionChanged = current.retentionMonths !== next.retentionMonths;
-  if (!replyChanged && !privacyChanged && !hoursChanged && !retentionChanged) return { changed: false };
+  if (!replyChanged && !hoursChanged && !retentionChanged) return { changed: false };
   db.transaction(() => {
     writeValue(db, HOUR_KEY, [next.reminderHours[0], next.reminderHours[1]], now);
     writeValue(db, REPLY_KEY, next.replyTo, now);
-    writeValue(db, PRIVACY_KEY, next.privacyText, now);
     writeValue(db, RETENTION_KEY, next.retentionMonths, now);
     writeAudit(
       db,
@@ -136,7 +119,6 @@ export function savePantrySettings(
         reminderCloser: next.reminderHours[1],
         retentionMonths: next.retentionMonths,
         replyChanged: replyChanged ? 1 : 0,
-        privacyChanged: privacyChanged ? 1 : 0,
       },
       now,
     );
@@ -161,13 +143,6 @@ function storedReplyTo(db: Database.Database): string | null {
   } catch {
     return null;
   }
-}
-
-function storedPrivacy(db: Database.Database): string {
-  const value = readValue(db, PRIVACY_KEY);
-  if (typeof value !== 'string') return '';
-  const parsed = parsePrivacy(value);
-  return parsed.ok ? parsed.value : '';
 }
 
 function storedRetention(db: Database.Database): number {
@@ -208,22 +183,13 @@ function parseMonths(value: string): number | null {
 
 function parseReply(value: string): { ok: true; value: string } | { ok: false; error: string } {
   if (value.includes('<') || value.includes('>')) {
-    return { ok: false, error: 'Enter an email address without a display name.' };
+    return { ok: false, error: 'Enter just the email address, without a name in front of it.' };
   }
   try {
     return { ok: true, value: normalizeEmail(value) };
   } catch {
     return { ok: false, error: 'Enter an email address.' };
   }
-}
-
-function parsePrivacy(value: string): { ok: true; value: string } | { ok: false; error: string } {
-  const cleaned = value.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\t/g, ' ').trim();
-  if (cleaned.length > MAX_PRIVACY_TEXT) return { ok: false, error: 'Keep the privacy wording under 8,000 characters.' };
-  if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(cleaned)) {
-    return { ok: false, error: 'Remove the unusual character in the privacy wording.' };
-  }
-  return { ok: true, value: cleaned };
 }
 
 function isHour(value: unknown): value is number {

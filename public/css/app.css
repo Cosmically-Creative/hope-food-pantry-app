@@ -1661,6 +1661,101 @@ article.shift-card {
   color: var(--hope-ink-2);
 }
 
+.settings-intro {
+  max-width: 40rem;
+  margin-bottom: 0.35rem;
+}
+
+.settings-intro h1 {
+  margin-bottom: 0.35rem;
+}
+
+.settings-intro p {
+  margin: 0;
+  color: var(--hope-ink-2);
+}
+
+.settings-form {
+  display: grid;
+  gap: 1rem;
+  max-width: 46rem;
+  margin-top: 1.15rem;
+}
+
+.settings-card {
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  padding: 1.25rem 1.35rem 1.35rem;
+  background: #fff;
+  border: 1px solid #e6eef3;
+  border-radius: 1.35rem;
+  box-shadow: 0 8px 24px rgb(34 55 70 / 0.05);
+}
+
+.settings-card h2 {
+  margin: 0;
+  font-size: 1.45rem;
+  font-weight: 650;
+}
+
+.settings-card-copy p,
+.settings-form .hint {
+  margin: 0.35rem 0 0;
+  font-weight: 400;
+  color: var(--hope-ink-2);
+}
+
+.settings-form label {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  font-weight: 650;
+}
+
+.settings-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.95rem;
+  align-items: start;
+}
+
+.settings-form select,
+.settings-form input[type="email"] {
+  width: 100%;
+  min-height: 48px;
+  padding: 0.7rem 1rem;
+  background: var(--hope-blue-50);
+  border: 0;
+  border-radius: 999px;
+  box-shadow: var(--hope-shadow);
+  font: inherit;
+  color: var(--hope-ink);
+}
+
+.settings-preview {
+  margin: 0;
+  padding: 0.85rem 1.05rem;
+  background: var(--hope-blue-wash);
+  border-radius: 1rem;
+  color: var(--hope-ink);
+  font-weight: 650;
+}
+
+.settings-save {
+  display: flex;
+}
+
+@media (max-width: 42em) {
+  .settings-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-form button {
+    width: 100%;
+  }
+}
+
 .error,
 .field-error {
   font-weight: 650;
@@ -2312,8 +2407,18 @@ button.btn-quiet::before {
 }
 
 .event-page .shift-card {
-  background: var(--hope-blue-50);
+  background: #f3f7fb;
   box-shadow: var(--hope-shadow-soft);
+}
+
+.event-page .desk-events {
+  background: #fff;
+  border: 1px solid #e6eef3;
+  box-shadow: 0 8px 24px rgb(34 55 70 / 0.05);
+}
+
+.event-page .desk-events .empty {
+  background: #f3f7fb;
 }
 
 .pick-bar {
@@ -2723,22 +2828,49 @@ button.btn-quiet::before {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.55rem;
+  padding-left: 0.55rem;
+  background: #f3f7fb;
+  border-radius: 0.95rem;
+  color: var(--hope-ink);
+}
+
+.event-page .need-pick:hover,
+.event-page .need-pick:has(.desk-row:focus-visible) {
+  background: #e8f1f7;
+}
+
+.event-page .need-pick:has(.desk-row:focus-visible) {
+  outline: 3px solid var(--hope-ink);
+  outline-offset: 3px;
+}
+
+.event-page .need-pick .pick {
+  min-height: 0;
 }
 
 .event-page .need-pick .desk-row {
   min-width: 0;
+  padding: 0.48rem 0.75rem 0.48rem 0;
+  background: transparent;
+  border-radius: 0;
 }
 
-.event-page .desk-row.is-ended {
+.event-page .need-pick .desk-row:hover,
+.event-page .need-pick .desk-row:focus-visible {
+  background: transparent;
+  color: inherit;
+  outline: none;
+}
+
+.event-page .need-pick:has(.desk-row.is-ended) {
   background: #eef1f4;
   color: #6b7784;
 }
 
-.event-page .desk-row.is-ended:hover,
-.event-page .desk-row.is-ended:focus-visible {
+.event-page .need-pick:has(.desk-row.is-ended):hover,
+.event-page .need-pick:has(.desk-row.is-ended:focus-visible) {
   background: #e4e9ee;
-  color: #6b7784;
 }
 
 .need-day .desk-rows {
@@ -2773,7 +2905,7 @@ button.btn-quiet::before {
   gap: 0.75rem 1rem;
   min-height: 4.15rem;
   padding: 0.7rem 0.95rem;
-  background: var(--hope-blue-75);
+  background: #f3f7fb;
   border-radius: 0.95rem;
   color: var(--hope-ink);
   text-decoration: none;
@@ -2781,7 +2913,7 @@ button.btn-quiet::before {
 
 .desk-row:hover,
 .desk-row:focus-visible {
-  background: var(--hope-blue-100);
+  background: #e8f1f7;
   color: var(--hope-ink);
   text-decoration: none;
 }
@@ -2913,7 +3045,7 @@ button.btn-quiet::before {
 .coordinator-board .desk-panel .empty {
   margin: 0;
   padding: 0.85rem 1rem;
-  background: var(--hope-blue-75);
+  background: #f3f7fb;
   border-radius: 0.95rem;
   box-shadow: none;
 }
@@ -4330,7 +4462,9 @@ main > .crumb,
   display: contents;
 }
 
-.event-edit:not([open]) > form {
+/* The closed details content is still a grid row. Hiding it drops the row gap that was sitting under the summary. */
+.event-edit:not([open]) > form,
+.event-edit:not([open])::details-content {
   display: none;
 }
 
@@ -4357,9 +4491,78 @@ main > .crumb,
   display: none;
 }
 
-.event-edit[open] > form {
+.event-edit[open] > form,
+.event-edit[open]::details-content {
   grid-column: 1 / -1;
   grid-row: 2;
+}
+
+.event-edit[open] > summary {
+  background: #f4f8fb;
+}
+
+.event-strip:has(.event-edit[open] .event-fields) {
+  padding-bottom: 0;
+}
+
+.event-fields {
+  max-width: none;
+  margin: 0.2rem -1rem 0;
+  padding: 1rem 1rem 1.05rem;
+  border-top: 1px solid #e6eef3;
+  border-radius: 0 0 0.9rem 0.9rem;
+  background: var(--hope-blue-75);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1rem;
+  align-items: start;
+}
+
+.event-fields > .error,
+.event-fields > label:not(.check) {
+  grid-column: 1 / -1;
+}
+
+.event-fields label {
+  line-height: 1.35;
+}
+
+.event-fields .hint {
+  font-size: 0.86rem;
+  line-height: 1.4;
+  color: #5c6b78;
+}
+
+.event-fields input[type="text"],
+.event-fields textarea {
+  background: #fff;
+  border: 1px solid #d5dee6;
+  box-shadow: none;
+}
+
+.event-fields textarea {
+  min-height: 5.75rem;
+}
+
+.event-fields > .check {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  min-height: 2.75rem;
+}
+
+.event-fields > button {
+  justify-self: end;
+  align-self: center;
+}
+
+@media (max-width: 42em) {
+  .event-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .event-fields > button {
+    justify-self: start;
+  }
 }
 
 .edit-chevron {

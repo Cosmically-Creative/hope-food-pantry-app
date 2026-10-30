@@ -349,7 +349,7 @@ export function createEvent(
       return { ok: true as const, id, mailed: 0 };
     }).immediate();
   } catch (err) {
-    if (isUniqueConstraint(err)) return { ok: false, error: 'That public address is already used.' };
+    if (isUniqueConstraint(err)) return { ok: false, error: 'Another event already uses that name.' };
     throw err;
   }
 }
@@ -386,7 +386,7 @@ export function updateEvent(
       return { ok: true as const, id, mailed };
     }).immediate();
   } catch (err) {
-    if (isUniqueConstraint(err)) return { ok: false, error: 'That public address is already used.' };
+    if (isUniqueConstraint(err)) return { ok: false, error: 'Another event already uses that name.' };
     throw err;
   }
 }

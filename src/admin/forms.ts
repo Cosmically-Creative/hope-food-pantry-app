@@ -51,7 +51,7 @@ export function parseEvent(values: EventValues): { ok: true; value: EventInput }
   if (title.length === 0) return { ok: false, error: 'Enter a title.' };
   if (title.length > 120) return { ok: false, error: 'Use a shorter title.' };
   const slug = values.slug.trim() ? normalizeSlug(values.slug) : normalizeSlug(title);
-  if (!validSlug(slug)) return { ok: false, error: 'Use a public address with lowercase letters, numbers, and hyphens.' };
+  if (!validSlug(slug)) return { ok: false, error: 'Use a title with a letter or number.' };
   const description = values.description.trim();
   if (description.length > 2000) return { ok: false, error: 'Use a shorter description.' };
   const location = values.location.trim();

@@ -2,7 +2,7 @@ import { Temporal } from '@js-temporal/polyfill';
 import { DESK_WINDOW_DAYS, type AdminEvent, type HomeEvent, type HomeShift, type AdminShift, type AdminShiftSummary, type AdminTemplate, type MoveTarget, type RosterPerson } from './admin/store.js';
 import { spotsSentence } from './schedule.js';
 import type { EventValues, ShiftValues, TemplateValues } from './admin/forms.js';
-import type { SettingsErrors, SettingsForm } from './settings.js';
+import { MAX_REMINDER_HOURS, MAX_RETENTION_MONTHS, type SettingsErrors, type SettingsForm } from './settings.js';
 import type { AppConfig } from './config.js';
 import {
   CONTACT_LIST_PAGE,
@@ -337,6 +337,13 @@ export function AdminHome(props: {
   );
 }
 
+const FIRST_REMINDER_HOURS = [168, 72, 48, 24] as const;
+const SECOND_REMINDER_HOURS = [24, 12, 4, 2, 1] as const;
+const RETENTION_MONTHS = [6, 12, 24, 36, 60, 120] as const;
+const USUAL_FIRST_HOURS = 48;
+const USUAL_SECOND_HOURS = 2;
+const USUAL_RETENTION_MONTHS = 24;
+
 export function SettingsPage(props: {
   config: AppConfig;
   csrf: string;
@@ -345,48 +352,147 @@ export function SettingsPage(props: {
   notice?: string;
 }) {
   const errors = props.errors ?? {};
+  const reminderNote = reminderPreview(props.values.reminderFar, props.values.reminderNear);
+  const keepNote = retentionPreview(props.values.retentionMonths);
   return (
     <>
       <Crumb items={[{ href: appPath(props.config, '/admin'), label: 'Coordinator' }, { label: 'Settings' }]} />
-      <h1>Settings</h1>
+      <header class="settings-intro">
+        <h1>Settings</h1>
+        <p>Choose when volunteers get a reminder, where their replies go, and how long signup details stay here. This applies to email that has not gone out yet.</p>
+      </header>
       <Notice notice={props.notice} />
-      <form method="post" action={appPath(props.config, '/admin/settings')} class="signup-form">
+      <form method="post" action={appPath(props.config, '/admin/settings')} class="settings-form" data-settings>
         <input type="hidden" name="csrf" value={props.csrf} />
-        <p>These apply to reminders and mail that have not been queued yet. Mail that was already accepted cannot be recalled.</p>
-        <label>
-          First reminder, hours before the shift
-          <input name="reminder_far" type="number" min="1" max="336" required value={props.values.reminderFar} />
-          <span class="hint">The default is 48. Use a whole number from 1 to 336.</span>
-          {errors.reminderFar ? <span class="error">{errors.reminderFar}</span> : null}
-        </label>
-        <label>
-          Second reminder, hours before the shift
-          <input name="reminder_near" type="number" min="1" max="336" required value={props.values.reminderNear} />
-          <span class="hint">The default is 2. The two times have to be different. A reminder is not sent after the shift starts.</span>
-          {errors.reminderNear ? <span class="error">{errors.reminderNear}</span> : null}
-        </label>
-        <label>
-          Reply-to address
-          <input name="reply_to" type="email" required value={props.values.replyTo} />
-          <span class="hint">Replies to volunteer and sign-in email go here. The sending address stays in the server configuration.</span>
-          {errors.replyTo ? <span class="error">{errors.replyTo}</span> : null}
-        </label>
-        <label>
-          Keep signups for, months
-          <input name="retention_months" type="number" min="1" max="120" required value={props.values.retentionMonths} />
-          <span class="hint">The default is 24, counted after the shift ends. After 1:00 AM Central Time, signups older than this lose their name, email, phone, and notes in this app. A spreadsheet already downloaded is left as it is.</span>
-          {errors.retentionMonths ? <span class="error">{errors.retentionMonths}</span> : null}
-        </label>
-        <label>
-          Privacy page wording
-          <textarea name="privacy_text">{props.values.privacyText}</textarea>
-          <span class="hint">Leave this blank until the pantry approves a notice. Saved wording is what the public privacy page shows. Saving it does not by itself make it an approved privacy policy. Start a new line for a new paragraph.</span>
-          {errors.privacyText ? <span class="error">{errors.privacyText}</span> : null}
-        </label>
-        <button type="submit">Save settings</button>
+        <section class="settings-card" aria-labelledby="reminders-heading">
+          <div class="settings-card-copy">
+            <h2 id="reminders-heading">Reminder emails</h2>
+            <p>Each person who is signed up gets two emails before the shift, so they remember to come. A reminder is not sent after the shift starts.</p>
+          </div>
+          <div class="settings-fields">
+            <label>
+              First reminder
+              <select name="reminder_far" required>
+                <ReminderOptions selected={props.values.reminderFar} choices={FIRST_REMINDER_HOURS} usual={USUAL_FIRST_HOURS} />
+              </select>
+              {errors.reminderFar ? <span class="error">{errors.reminderFar}</span> : null}
+            </label>
+            <label>
+              Second reminder
+              <select name="reminder_near" required>
+                <ReminderOptions selected={props.values.reminderNear} choices={SECOND_REMINDER_HOURS} usual={USUAL_SECOND_HOURS} />
+              </select>
+              {errors.reminderNear ? <span class="error">{errors.reminderNear}</span> : null}
+            </label>
+          </div>
+          {reminderNote ? <p class="settings-preview" data-reminder-preview>{reminderNote}</p> : null}
+        </section>
+        <section class="settings-card" aria-labelledby="replies-heading">
+          <div class="settings-card-copy">
+            <h2 id="replies-heading">Where replies go</h2>
+            <p>When a volunteer replies to a pantry email, it comes to this address. Use an inbox someone at the pantry checks.</p>
+          </div>
+          <label>
+            Email address
+            <input name="reply_to" type="email" autocomplete="email" required value={props.values.replyTo} />
+            <span class="hint">This does not change the address the email is sent from.</span>
+            {errors.replyTo ? <span class="error">{errors.replyTo}</span> : null}
+          </label>
+        </section>
+        <section class="settings-card" aria-labelledby="keep-heading">
+          <div class="settings-card-copy">
+            <h2 id="keep-heading">How long we keep signup details</h2>
+            <p>After a shift ends, that person's name, email, and phone stay on the signup for a while, then they are removed.</p>
+          </div>
+          <label>
+            Keep them for
+            <select name="retention_months" required>
+              <RetentionOptions selected={props.values.retentionMonths} />
+            </select>
+            <span class="hint">A spreadsheet already downloaded is left as it is. People stay on the contact list.</span>
+            {errors.retentionMonths ? <span class="error">{errors.retentionMonths}</span> : null}
+          </label>
+          {keepNote ? <p class="settings-preview" data-retention-preview>{keepNote}</p> : null}
+        </section>
+        <div class="settings-save">
+          <button type="submit">Save these choices</button>
+        </div>
       </form>
+      <script src={assetHref(props.config, '/js/settings.js')} defer />
     </>
   );
+}
+
+function ReminderOptions(props: { selected: string; choices: readonly number[]; usual: number }) {
+  return listedHours(props.selected, props.choices).map((hours) => (
+    <option value={String(hours)} key={hours} selected={String(hours) === props.selected.trim() ? true : undefined}>
+      {`${aheadChoice(hours)}${hours === props.usual ? ' (usual)' : ''}`}
+    </option>
+  ));
+}
+
+function RetentionOptions(props: { selected: string }) {
+  return listedMonths(props.selected).map((months) => (
+    <option value={String(months)} key={months} selected={String(months) === props.selected.trim() ? true : undefined}>
+      {`${keepPhrase(months)}${months === USUAL_RETENTION_MONTHS ? ' (usual)' : ''}`}
+    </option>
+  ));
+}
+
+function listedHours(selected: string, choices: readonly number[]): number[] {
+  const current = wholeInRange(selected, 1, MAX_REMINDER_HOURS);
+  if (current === null || choices.includes(current)) return [...choices];
+  return [...choices, current].sort((a, b) => b - a);
+}
+
+function listedMonths(selected: string): number[] {
+  const current = wholeInRange(selected, 1, MAX_RETENTION_MONTHS);
+  if (current === null || (RETENTION_MONTHS as readonly number[]).includes(current)) return [...RETENTION_MONTHS];
+  return [...RETENTION_MONTHS, current].sort((a, b) => a - b);
+}
+
+function reminderPreview(far: string, near: string): string | null {
+  const first = wholeInRange(far, 1, MAX_REMINDER_HOURS);
+  const second = wholeInRange(near, 1, MAX_REMINDER_HOURS);
+  if (first === null || second === null) return null;
+  if (first === second) return 'Choose two different times. One email should go out earlier than the other.';
+  const earlier = Math.max(first, second);
+  const closer = Math.min(first, second);
+  return `Volunteers get an email ${aheadChoice(earlier)} the shift, and another ${aheadChoice(closer)} the shift.`;
+}
+
+function retentionPreview(months: string): string | null {
+  const count = wholeInRange(months, 1, MAX_RETENTION_MONTHS);
+  if (count === null) return null;
+  return `Names, email addresses, and phone numbers come off a signup ${keepPhrase(count)} after the shift ends.`;
+}
+
+function aheadChoice(hours: number): string {
+  if (hours === 1) return '1 hour before';
+  if (hours % 168 === 0) {
+    const weeks = hours / 168;
+    return weeks === 1 ? '1 week before' : `${weeks} weeks before`;
+  }
+  if (hours % 24 === 0) {
+    const days = hours / 24;
+    return days === 1 ? '1 day before' : `${days} days before`;
+  }
+  return `${hours} hours before`;
+}
+
+function keepPhrase(months: number): string {
+  if (months % 12 === 0) {
+    const years = months / 12;
+    return years === 1 ? '1 year' : `${years} years`;
+  }
+  return months === 1 ? '1 month' : `${months} months`;
+}
+
+function wholeInRange(value: string, min: number, max: number): number | null {
+  const trimmed = value.trim();
+  if (!/^[1-9][0-9]{0,2}$/.test(trimmed)) return null;
+  const count = Number(trimmed);
+  return count >= min && count <= max ? count : null;
 }
 
 export function AdminsPage(props: {
@@ -796,7 +902,7 @@ export function EventEditor(props: {
               Edit details
               <span class="edit-chevron" aria-hidden="true" />
             </summary>
-            <EventForm action={props.action} csrf={props.csrf} values={props.values} error={props.error} submitLabel={props.submitLabel} wide />
+            <EventForm action={props.action} csrf={props.csrf} values={props.values} error={props.error} submitLabel={props.submitLabel} wide panel />
           </details>
         </section>
       ) : (
@@ -1659,41 +1765,30 @@ function EventForm(props: {
   heading?: string;
   headingId?: string;
   wide?: boolean;
+  panel?: boolean;
 }) {
+  const formClass = ['signup-form', props.wide ? 'event-details-form' : '', props.panel ? 'event-fields' : ''].filter(Boolean).join(' ');
   return (
-    <form method="post" action={props.action} class={props.wide ? 'signup-form event-details-form' : 'signup-form'}>
+    <form method="post" action={props.action} class={formClass}>
       {props.heading ? <h2 id={props.headingId}>{props.heading}</h2> : null}
       <input type="hidden" name="csrf" value={props.csrf} />
-      {props.creating ? <input type="hidden" name="tz" value={props.values.tz} /> : null}
+      <input type="hidden" name="tz" value={props.values.tz} />
+      {props.values.slug ? <input type="hidden" name="slug" value={props.values.slug} /> : null}
       {props.error ? <p class="error">{props.error}</p> : null}
       <label>
         Title
         <input name="title" type="text" required value={props.values.title} />
       </label>
-      {props.creating ? null : (
-        <label>
-          Public address
-          <input name="slug" type="text" value={props.values.slug} />
-          <span class="hint">Letters, numbers, and hyphens. Leave this blank to build it from the title. This becomes /e/this-address.</span>
-        </label>
-      )}
       <label>
         Description
         <textarea name="description">{props.values.description}</textarea>
       </label>
       {props.creating ? null : (
-        <>
-          <label>
-            Location
-            <input name="location" type="text" value={props.values.location} />
-            <span class="hint">Changing the location emails people on shifts that have not ended.</span>
-          </label>
-          <label>
-            Time zone
-            <input name="tz" type="text" required value={props.values.tz} />
-            <span class="hint">Use an IANA time zone, such as America/Chicago.</span>
-          </label>
-        </>
+        <label>
+          Location
+          <input name="location" type="text" value={props.values.location} />
+          <span class="hint">Changing the location emails people on shifts that have not ended.</span>
+        </label>
       )}
       <label class="check">
         <input type="checkbox" name="published" value="yes" checked={props.values.published ? true : undefined} />

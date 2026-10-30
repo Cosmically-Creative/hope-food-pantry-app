@@ -33,31 +33,32 @@ describe('coordinator settings', () => {
     expect(response.headers.get('location')).toBe('/login');
   });
 
-  it('shows the defaults, then saves reminder times, reply-to, retention, and privacy wording', async () => {
+  it('shows the defaults, then saves reminder times, reply-to, and retention', async () => {
     const { app, db } = await buildApp();
     const cookie = await signIn(app, db);
     const first = await app.request('/admin/settings', { headers: { cookie } });
     const firstHtml = await first.text();
     expect(first.status).toBe(200);
     expect(firstHtml).toContain('value="48"');
+    expect(firstHtml).toContain('2 days before (usual)');
     expect(firstHtml).toContain('value="2"');
+    expect(firstHtml).toContain('2 hours before (usual)');
     expect(firstHtml).toContain('value="volunteer@example.invalid"');
     expect(firstHtml).toContain('value="24"');
+    expect(firstHtml).toContain('2 years (usual)');
+    expect(firstHtml).toContain('Volunteers get an email 2 days before the shift, and another 2 hours before the shift.');
     expect(firstHtml).toContain('A spreadsheet already downloaded is left as it is.');
-    expect(firstHtml).toContain('does not by itself make it an approved privacy policy');
+    expect(firstHtml).not.toContain('name="privacy_text"');
+    expect(firstHtml).not.toContain('Privacy');
 
     const rejected = await postSettings(app, cookie, validFields({ reminder_far: '12', reminder_near: '12' }));
     expect(rejected.status).toBe(400);
-    expect(await rejected.text()).toContain('The two reminder times have to be different.');
+    expect(await rejected.text()).toContain('Choose two different times.');
     expect(count(db, "SELECT COUNT(*) AS n FROM settings")).toBe(0);
 
     const named = await postSettings(app, cookie, validFields({ reply_to: 'Hope <pantry@example.invalid>' }));
     expect(named.status).toBe(400);
-    expect(await named.text()).toContain('Enter an email address without a display name.');
-
-    const huge = await postSettings(app, cookie, validFields({ privacy_text: 'a'.repeat(8001) }));
-    expect(huge.status).toBe(400);
-    expect(await huge.text()).toContain('Keep the privacy wording under 8,000 characters.');
+    expect(await named.text()).toContain('Enter just the email address, without a name in front of it.');
 
     const stale = await app.request('/admin/settings', {
       method: 'POST',
@@ -66,6 +67,7 @@ describe('coordinator settings', () => {
     });
     expect(stale.status).toBe(403);
 
+    db.prepare(`INSERT INTO settings (key, value_json, updated_at) VALUES ('privacy_text', '"We keep names."', ?)`).run(NOW);
     const saved = await postSettings(
       app,
       cookie,
@@ -74,7 +76,6 @@ describe('coordinator settings', () => {
         reminder_near: '24',
         reply_to: 'Pantry@Example.invalid',
         retention_months: '12',
-        privacy_text: 'We keep names.\n\n<script>alert(1)</script>',
       }),
     );
     expect(saved.status).toBe(303);
@@ -83,19 +84,19 @@ describe('coordinator settings', () => {
     const html = await page.text();
     expect(html).toContain('Settings saved.');
     expect(html).toContain('value="24"');
+    expect(html).toContain('1 day before');
     expect(html).toContain('value="3"');
+    expect(html).toContain('3 hours before');
     expect(html).toContain('value="pantry@example.invalid"');
     expect(html).toContain('value="12"');
-    expect(html).toContain('We keep names.');
-    expect(html).toContain('&lt;script&gt;');
-    expect(html).not.toContain('<script>');
+    expect(html).toContain('1 year');
+    expect(html).not.toContain('We keep names.');
+    expect(html).not.toContain('name="privacy_text"');
+    expect(count(db, "SELECT COUNT(*) AS n FROM settings WHERE key = 'privacy_text'")).toBe(0);
 
-    const privacy = await app.request('/privacy');
-    const privacyHtml = await privacy.text();
-    expect(privacyHtml).toContain('We keep names.');
-    expect(privacyHtml).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
-    expect(privacyHtml).not.toContain('<script>');
-    expect(privacyHtml).not.toContain('does not have an approved privacy notice yet');
+    const missing = await app.request('/privacy');
+    expect(missing.status).toBe(404);
+    expect(await missing.text()).toContain('That page is not available');
 
     const audit = db.prepare("SELECT detail_json AS detail_json FROM audit WHERE action = 'settings.update'").all() as { detail_json: string }[];
     expect(audit).toHaveLength(1);
@@ -103,9 +104,8 @@ describe('coordinator settings', () => {
     expect(audit[0]?.detail_json).toContain('"reminderCloser":3');
     expect(audit[0]?.detail_json).toContain('"retentionMonths":12');
     expect(audit[0]?.detail_json).toContain('"replyChanged":1');
-    expect(audit[0]?.detail_json).toContain('"privacyChanged":1');
+    expect(audit[0]?.detail_json).not.toContain('privacyChanged');
     expect(audit[0]?.detail_json).not.toContain('@');
-    expect(audit[0]?.detail_json).not.toContain('We keep names');
 
     const again = await postSettings(
       app,
@@ -115,7 +115,6 @@ describe('coordinator settings', () => {
         reminder_near: '3',
         reply_to: 'pantry@example.invalid',
         retention_months: '12',
-        privacy_text: 'We keep names.\n\n<script>alert(1)</script>',
       }),
     );
     expect(again.status).toBe(303);
@@ -193,7 +192,6 @@ function validFields(overrides: Record<string, string> = {}): Record<string, str
     reminder_near: '2',
     reply_to: 'volunteer@example.invalid',
     retention_months: '24',
-    privacy_text: '',
     ...overrides,
   };
 }

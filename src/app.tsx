@@ -5,9 +5,8 @@ import type { Child } from 'hono/jsx';
 import { registerAdmin } from './admin-http.js';
 import { readSession } from './auth/session.js';
 import type { AppConfig } from './config.js';
-import { EmptySchedulePage, EventPage, Layout, NotFoundPage, PrivacyPage, ProblemPage } from './pages.js';
+import { EmptySchedulePage, EventPage, Layout, NotFoundPage, ProblemPage } from './pages.js';
 import { getPublishedEvent } from './schedule.js';
-import { privacyParagraphs, readPantrySettings } from './settings.js';
 import { registerReminderOff } from './reminder-http.js';
 import { registerPublicSignup } from './signup-http.js';
 import { securityHeaders } from './security.js';
@@ -79,11 +78,6 @@ export function createApp(
   if (config.basePath !== '') {
     app.get(`${config.basePath}/`, (c) => c.redirect(config.basePath, 302));
   }
-
-  app.get(appPath(config, '/privacy'), (c) => {
-    const paragraphs = privacyParagraphs(readPantrySettings(db, config.mail.replyTo).privacyText);
-    return page(c, config, db, now(), 'Privacy · Hope Volunteer', <PrivacyPage paragraphs={paragraphs} />);
-  });
 
   app.get(appPath(config, '/e/:slug'), (c) => {
     const at = now();
