@@ -2,6 +2,7 @@
   bindNav();
   bindCalendar();
   bindViewMenu();
+  bindManage();
   document.querySelectorAll('[data-contact]').forEach(bindContact);
   document.querySelectorAll('[data-see-more]').forEach(bindSeeMore);
 
@@ -25,7 +26,7 @@
   }
 
   function bindViewMenu() {
-    var menus = document.querySelectorAll('details.view-menu');
+    var menus = document.querySelectorAll('details.view-menu, details.manage-menu');
     if (!menus.length) return;
     document.addEventListener('click', function (event) {
       for (var i = 0; i < menus.length; i += 1) {
@@ -72,6 +73,29 @@
         detail.parentNode.appendChild(drawer);
       }
     }
+  }
+
+  function bindManage() {
+    document.querySelectorAll('[data-reminder-toggle]').forEach(function (box) {
+      box.addEventListener('change', function () {
+        if (box.form) box.form.submit();
+      });
+    });
+    var opener = document.querySelector('[data-manage-cancel]');
+    var dialog = document.getElementById('manage-cancel-dialog');
+    if (!opener || !dialog || typeof dialog.showModal !== 'function') return;
+    opener.addEventListener('click', function (event) {
+      event.preventDefault();
+      if (dialog.open) dialog.close();
+      dialog.showModal();
+      dialog.classList.add('is-modal');
+    });
+    dialog.addEventListener('click', function (event) {
+      if (event.target === dialog) dialog.close();
+    });
+    dialog.addEventListener('close', function () {
+      dialog.classList.remove('is-modal');
+    });
   }
 
   function bindSeeMore(link) {

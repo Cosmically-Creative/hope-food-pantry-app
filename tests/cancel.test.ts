@@ -333,10 +333,8 @@ describe('manage-link party size', () => {
     const html = await viewed.text();
     expect(viewed.status).toBe(200);
     expect(html).toContain('How many people?');
-    expect(html).toContain('This signup holds that many spots.');
-    expect(html).toContain('You don&#39;t need to add their names.');
-    expect(html).toContain('Change how many people are coming. The signup stays, and the name stays the same.');
-    expect(html).toContain('Save the number of people');
+    expect(html).toContain('Including you. This holds that many spots, and the name stays the same.');
+    expect(html).toContain('>Save<');
     expect(partyOptions(html)).toEqual(['1', '2', '3', '4', '5', '6']);
     expect(html).toContain('<dd>4</dd>');
     expect(db.prepare('SELECT group_size, updated_at FROM signups').get()).toEqual({

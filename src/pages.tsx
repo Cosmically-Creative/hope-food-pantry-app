@@ -370,117 +370,182 @@ export function ManagePage(props: {
   cancel: { action: string; token: string } | null;
   switches: SwitchForm | null;
   party?: PartyForm | null;
-  reminders?: { action: string; token: string } | 'off' | null;
+  reminders?: { action: string; token: string; on: boolean } | null;
   notice?: string;
   note?: string;
 }) {
   const signup = props.signup;
+  const cancelled = signup.status !== 'confirmed';
   return (
-    <>
-      <h1>Your signup</h1>
-      <p class={signup.status === 'confirmed' ? 'status is-confirmed' : 'status'}>{signup.status === 'confirmed' ? 'Confirmed' : 'Cancelled'}</p>
-      <p>{signup.eventTitle}</p>
-      <h2>{signup.role}</h2>
-      <p class="when">
-        <time dateTime={signup.when.date}>{signup.when.dateLabel}</time> {signup.when.timeLabel} {signup.when.abbreviation}
-      </p>
-      {signup.location ? <p class="location">{signup.location}</p> : null}
-      <dl class="details">
-        <div>
-          <dt>Name</dt>
-          <dd>{signup.name}</dd>
-        </div>
-        <div>
-          <dt>People</dt>
-          <dd>{signup.groupSize}</dd>
-        </div>
-        <div>
-          <dt>Email</dt>
-          <dd>{signup.email}</dd>
-        </div>
-        {signup.phone ? (
-          <div>
-            <dt>Phone</dt>
-            <dd>{signup.phone}</dd>
-          </div>
-        ) : null}
-        {signup.notes ? (
-          <div>
-            <dt>Notes</dt>
-            <dd class="description">{signup.notes}</dd>
-          </div>
-        ) : null}
-      </dl>
+    <article class="manage">
+      <header class="manage-intro">
+        <h1>Your signup</h1>
+        <p class={cancelled ? 'status is-cancelled' : 'status is-confirmed'}>{cancelled ? 'Cancelled' : 'Confirmed'}</p>
+        <p>{signup.eventTitle}</p>
+        <h2>{signup.role}</h2>
+        <p class="when">
+          <time dateTime={signup.when.date}>{signup.when.dateLabel}</time> {signup.when.timeLabel} {signup.when.abbreviation}
+        </p>
+        {signup.location ? <p class="location">{signup.location}</p> : null}
+      </header>
       {props.note ? <p class="status">{props.note}</p> : null}
       {props.notice ? (
         <p class="error" role="alert">
           {props.notice}
         </p>
       ) : null}
-      {props.party ? (
-        <form class="move-form" method="post" action={props.party.action}>
-          <p>Change how many people are coming. The signup stays, and the name stays the same.</p>
-          <input type="hidden" name="party_token" value={props.party.token} />
-          <PartySizeField idPrefix="manage" value={props.party.value} error={props.party.error} remaining={props.party.remaining} />
-          <button type="submit">Save the number of people</button>
-        </form>
-      ) : null}
-      {props.switches ? (
-        props.switches.targets.length === 0 ? (
-          <p>
-            {signup.groupSize > 1
-              ? 'There is no other open shift with room for everyone on this signup.'
-              : 'There is no other open shift you can switch to.'}
-          </p>
-        ) : (
-          <form class="move-form" method="post" action={props.switches.action}>
-            <p>
-              {signup.groupSize > 1
-                ? `Switch to another shift in this event. This opens the ${signup.groupSize} spots here and queues a change email. This link stops working, and the next page has the new one.`
-                : 'Switch to another shift in this event. This opens your spot here and queues a change email. This link stops working, and the next page has the new one.'}
-            </p>
-            <input type="hidden" name="switch_token" value={props.switches.token} />
-            <input type="hidden" name="form_token" value={props.switches.formToken} />
-            <label for="switch-to">
-              Switch to
-              <select id="switch-to" name="destination" required>
-                <ShiftTargetOptions targets={props.switches.targets} />
-              </select>
-            </label>
-            <button type="submit">Switch</button>
-          </form>
-        )
-      ) : null}
-      {props.reminders === 'off' ? (
-        <p>Reminder emails for this signup are off. The signup stays. Confirmation, change, and cancellation emails still arrive.</p>
-      ) : null}
-      <div class="manage-actions">
-        {props.reminders && props.reminders !== 'off' ? (
-          <form class="cancel-form" method="post" action={props.reminders.action}>
-            <p>Stop reminder emails for this signup. The signup stays. Confirmation, change, and cancellation emails still arrive.</p>
-            <input type="hidden" name="reminder_token" value={props.reminders.token} />
-            <button type="submit">Stop reminder emails</button>
-          </form>
+      <section class="manage-record">
+        {props.cancel || props.reminders ? (
+          <div class="manage-tools">
+            <ReminderMenu reminders={props.reminders} />
+            {props.cancel ? (
+              <form id="manage-cancel-form" class="manage-cancel" method="post" action={props.cancel.action}>
+                <input type="hidden" name="cancel_token" value={props.cancel.token} />
+                <button type="submit" class="manage-x" aria-label="Cancel this signup" aria-haspopup="dialog" data-manage-cancel="">
+                  <span aria-hidden="true">×</span>
+                </button>
+              </form>
+            ) : null}
+          </div>
         ) : null}
-        {props.cancel ? (
-          <form class="cancel-form" method="post" action={props.cancel.action}>
+        <dl class="details">
+          <div>
+            <dt>Name</dt>
+            <dd>{signup.name}</dd>
+          </div>
+          <div>
+            <dt>People</dt>
+            <dd>{signup.groupSize}</dd>
+          </div>
+          <div>
+            <dt>Email</dt>
+            <dd>{signup.email}</dd>
+          </div>
+          {signup.phone ? (
+            <div>
+              <dt>Phone</dt>
+              <dd>{signup.phone}</dd>
+            </div>
+          ) : null}
+          {signup.notes ? (
+            <div class="is-wide">
+              <dt>Notes</dt>
+              <dd class="description">{signup.notes}</dd>
+            </div>
+          ) : null}
+        </dl>
+        {props.party || props.switches ? (
+          <div class="manage-follow">
+            {props.party ? (
+              <form class="move-form manage-action" method="post" action={props.party.action}>
+                <input type="hidden" name="party_token" value={props.party.token} />
+                <div class="manage-action-row">
+                  <label for="manage-partySize">
+                    How many people?
+                    <select
+                      id="manage-partySize"
+                      name="party_size"
+                      aria-invalid={props.party.error ? 'true' : undefined}
+                      aria-describedby={props.party.error ? 'manage-partySize-hint manage-partySize-error' : 'manage-partySize-hint'}
+                    >
+                      {partyChoices(props.party.remaining).map((count) => (
+                        <option key={count} value={String(count)} selected={props.party.value === String(count) ? true : undefined}>
+                          {partyChoiceLabel(count)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button type="submit">Save</button>
+                </div>
+                <p class="hint" id="manage-partySize-hint">
+                  Including you. This holds that many spots, and the name stays the same.
+                </p>
+                {props.party.error ? (
+                  <p class="field-error" id="manage-partySize-error">
+                    {props.party.error}
+                  </p>
+                ) : null}
+              </form>
+            ) : null}
+            {props.switches ? (
+              props.switches.targets.length === 0 ? (
+                <p class="hint">
+                  {signup.groupSize > 1
+                    ? 'There is no other open shift with room for everyone on this signup.'
+                    : 'There is no other open shift you can switch to.'}
+                </p>
+              ) : (
+                <form class="move-form manage-action" method="post" action={props.switches.action}>
+                  <input type="hidden" name="switch_token" value={props.switches.token} />
+                  <input type="hidden" name="form_token" value={props.switches.formToken} />
+                  <div class="manage-action-row">
+                    <label for="switch-to">
+                      Switch to
+                      <select id="switch-to" name="destination" required>
+                        <ShiftTargetOptions targets={props.switches.targets} />
+                      </select>
+                    </label>
+                    <button type="submit">Switch</button>
+                  </div>
+                  <p class="hint">
+                    {signup.groupSize > 1
+                      ? `Opens these ${signup.groupSize} spots, queues a change email, and replaces this link.`
+                      : 'Opens your spot here, queues a change email, and replaces this link.'}
+                  </p>
+                </form>
+              )
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+      {props.cancel ? (
+        <dialog id="manage-cancel-dialog" class="confirm-dialog" aria-labelledby="manage-cancel-title">
+          <div class="confirm-card">
+            <form method="dialog" id="manage-cancel-dismiss" class="confirm-x">
+              <button type="submit" class="event-dialog-close" aria-label="Close">
+                <span aria-hidden="true">×</span>
+              </button>
+            </form>
+            <h2 id="manage-cancel-title">Are you sure you want to cancel?</h2>
             <p>
               {signup.groupSize > 1
                 ? `Cancel this signup to open these ${signup.groupSize} spots for someone else. A cancellation email is queued when you cancel.`
                 : 'Cancel this signup to open the spot for someone else. A cancellation email is queued when you cancel.'}
             </p>
-            <input type="hidden" name="cancel_token" value={props.cancel.token} />
-            <button type="submit">Cancel this signup</button>
-          </form>
-        ) : (
-          <p>
-            {signup.groupSize > 1
-              ? `This signup is cancelled. The ${signup.groupSize} spots it held are open for someone else. A cancellation email is queued.`
-              : 'This signup is cancelled. The spot is open for someone else. A cancellation email is queued.'}
-          </p>
-        )}
-      </div>
-    </>
+            <div class="confirm-actions">
+              <button type="submit" form="manage-cancel-form">
+                Cancel this signup
+              </button>
+              <button type="submit" class="btn-quiet" form="manage-cancel-dismiss">
+                Go back
+              </button>
+            </div>
+          </div>
+        </dialog>
+      ) : (
+        <p>
+          {signup.groupSize > 1
+            ? `This signup is cancelled. The ${signup.groupSize} spots it held are open for someone else. A cancellation email is queued.`
+            : 'This signup is cancelled. The spot is open for someone else. A cancellation email is queued.'}
+        </p>
+      )}
+    </article>
+  );
+}
+
+function ReminderMenu(props: { reminders?: { action: string; token: string; on: boolean } | null }) {
+  if (!props.reminders) return null;
+  return (
+    <details class="manage-menu">
+      <summary>Reminders</summary>
+      <form class="manage-menu-panel" method="post" action={props.reminders.action}>
+        <input type="hidden" name="reminder_token" value={props.reminders.token} />
+        <label class="check">
+          <input type="checkbox" name="reminders" value="on" checked={props.reminders.on} data-reminder-toggle="" />
+          On
+        </label>
+      </form>
+    </details>
   );
 }
 

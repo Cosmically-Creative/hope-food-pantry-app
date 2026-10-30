@@ -75,6 +75,8 @@ export function queueDueReminders(db: Database.Database, mail: MailIdentity, sec
   }).immediate();
 }
 
+const REMINDERS_OFF_REASON = 'Reminders were turned off before this message was sent.';
+
 /** Turns reminders off for one signup. Confirmation, change, and cancellation mail still queue. */
 export function disableReminders(
   db: Database.Database,
@@ -89,8 +91,31 @@ export function disableReminders(
     if (row.reminders_off !== 1) {
       db.prepare('UPDATE signups SET reminders_off = 1, updated_at = ? WHERE id = ? AND anonymized_at IS NULL').run(now, signupId);
     }
-    cancelPendingReminders(db, signupId, 'Reminders were turned off before this message was sent.');
+    cancelPendingReminders(db, signupId, REMINDERS_OFF_REASON);
     return { ok: true, already: row.reminders_off === 1 };
+  }).immediate();
+}
+
+/** Turns reminders back on and restores a reminder that was cancelled only because they were off. */
+export function enableReminders(
+  db: Database.Database,
+  signupId: number,
+  now: string,
+): { ok: true } | { ok: false } {
+  return db.transaction((): { ok: true } | { ok: false } => {
+    const row = db
+      .prepare('SELECT reminders_off AS reminders_off FROM signups WHERE id = ? AND anonymized_at IS NULL')
+      .get(signupId) as { reminders_off: number } | undefined;
+    if (!row) return { ok: false };
+    if (row.reminders_off === 1) {
+      db.prepare('UPDATE signups SET reminders_off = 0, updated_at = ? WHERE id = ? AND anonymized_at IS NULL').run(now, signupId);
+    }
+    db.prepare(
+      `UPDATE outbox
+       SET status = 'pending', last_error = NULL
+       WHERE signup_id = ? AND kind = 'reminder' AND status = 'cancelled' AND last_error = ?`,
+    ).run(signupId, REMINDERS_OFF_REASON);
+    return { ok: true };
   }).immediate();
 }
 

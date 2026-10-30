@@ -176,10 +176,11 @@ describe('reminder mail', () => {
     const saved = reserveSignup(db, reservation(shiftId));
     expect(saved.ok && saved.manageToken).toBeTruthy();
     if (!saved.ok || !saved.manageToken) return;
+    queueDueReminders(db, MAIL, SECRET, NOW);
     const page = await app.request(`/m/${saved.manageToken}`);
     const html = await page.text();
     const token = /name="reminder_token"[^>]*value="([^"]*)"/.exec(html)?.[1] ?? '';
-    expect(html).toContain('Stop reminder emails');
+    expect(html).toContain('data-reminder-toggle');
 
     const stopped = await app.request(`/m/${saved.manageToken}/reminders`, {
       method: 'POST',
@@ -188,10 +189,22 @@ describe('reminder mail', () => {
     });
     expect(stopped.status).toBe(303);
     expect(db.prepare(`SELECT reminders_off, status FROM signups`).get()).toEqual({ reminders_off: 1, status: 'confirmed' });
+    expect(db.prepare(`SELECT status FROM outbox WHERE kind = 'reminder'`).get()).toEqual({ status: 'cancelled' });
     const after = await app.request(`/m/${saved.manageToken}`);
     const afterHtml = await after.text();
-    expect(afterHtml).toContain('Reminder emails for this signup are off.');
-    expect(afterHtml).not.toContain('name="reminder_token"');
+    expect(afterHtml).toContain('name="reminder_token"');
+    expect(afterHtml).not.toContain('checked');
+
+    const resumed = await app.request(`/m/${saved.manageToken}/reminders`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ reminder_token: token, reminders: 'on' }),
+    });
+    expect(resumed.status).toBe(303);
+    expect(db.prepare(`SELECT reminders_off, status FROM signups`).get()).toEqual({ reminders_off: 0, status: 'confirmed' });
+    expect(db.prepare(`SELECT status FROM outbox WHERE kind = 'reminder'`).get()).toEqual({ status: 'pending' });
+    const resumedHtml = await (await app.request(`/m/${saved.manageToken}`)).text();
+    expect(resumedHtml).toContain('checked');
   });
 });
 

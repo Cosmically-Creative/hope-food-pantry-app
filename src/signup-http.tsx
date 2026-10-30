@@ -30,7 +30,7 @@ import { getPublicShift, type PublicShift } from './schedule.js';
 import { SIGNUP_TOO_EARLY } from './signup-window.js';
 import { EMPTY_SIGNUP, parsePartySize, parseSignupForm, spotsLeftMessage, type SignupErrors, type SignupValues } from './signup-form.js';
 import type { MailIdentity } from './mail/types.js';
-import { disableReminders } from './reminders.js';
+import { disableReminders, enableReminders, queueDueReminders } from './reminders.js';
 import { cancelSignup, changePartySize, confirmedOperationShift, findSignupByOperation, managePartyLimit, readManageSignup, reserveSignup } from './signup.js';
 import { verifyTurnstile, type TurnstileCheck, type TurnstileVerdict } from './turnstile.js';
 import { appPath, cookiePath } from './url.js';
@@ -105,7 +105,7 @@ export function registerPublicSignup(app: Hono, services: SignupServices): void 
 
   app.post(appPath(config, '/m/:token/switch'), (c) => submitSwitch(c, services));
   app.post(appPath(config, '/m/:token/party'), (c) => submitParty(c, services));
-  app.post(appPath(config, '/m/:token/reminders'), (c) => submitRemindersOff(c, services));
+  app.post(appPath(config, '/m/:token/reminders'), (c) => submitReminders(c, services));
   app.post(appPath(config, '/m/:token'), (c) => submitCancel(c, services));
 }
 
@@ -503,16 +503,16 @@ function reminderForm(
   services: SignupServices,
   token: string,
   signup: { status: 'confirmed' | 'cancelled'; remindersOff: boolean },
-): { action: string; token: string } | 'off' | null {
+): { action: string; token: string; on: boolean } | null {
   if (signup.status !== 'confirmed') return null;
-  if (signup.remindersOff) return 'off';
   return {
     action: appPath(services.config, `/m/${token}/reminders`),
     token: issueReminderPageToken(services.config.sessionSecret, token),
+    on: !signup.remindersOff,
   };
 }
 
-async function submitRemindersOff(c: Context, services: SignupServices): Promise<Response> {
+async function submitReminders(c: Context, services: SignupServices): Promise<Response> {
   const token = c.req.param('token') ?? '';
   const signup = readManageSignup(services.db, token, services.now());
   if (!signup) return missingManage(c, services);
@@ -523,12 +523,16 @@ async function submitRemindersOff(c: Context, services: SignupServices): Promise
   if (!reminderPageTokenMatches(services.config.sessionSecret, token, textField(body, 'reminder_token'))) {
     return showManage(c, services, token, 400, CANCEL_REJECTED);
   }
+  const on = textField(body, 'reminders') === 'on';
   try {
-    const result = disableReminders(services.db, signup.signupId, services.now());
+    const result = on
+      ? enableReminders(services.db, signup.signupId, services.now())
+      : disableReminders(services.db, signup.signupId, services.now());
     if (!result.ok) return missingManage(c, services);
+    if (on) queueDueReminders(services.db, mailIdentity(services.db, services.config), services.config.sessionSecret, services.now());
   } catch (err) {
     if (!isBusy(err)) throw err;
-    console.error('Reminder opt-out could not lock the database.');
+    console.error('Reminder setting could not lock the database.');
     return showManage(c, services, token, 503, CANCEL_UNAVAILABLE);
   }
   c.header('Cache-Control', 'no-store');

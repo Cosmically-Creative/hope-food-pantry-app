@@ -661,6 +661,245 @@ main a:hover {
   text-decoration: none;
 }
 
+.manage {
+  display: grid;
+  gap: 0.35rem 0;
+  width: min(64rem, 100%);
+  margin-inline: auto;
+}
+
+.manage-intro h1 {
+  margin-bottom: 0.35rem;
+}
+
+.manage-intro h2,
+.manage-intro p {
+  margin: 0.15rem 0;
+}
+
+.manage-intro .status {
+  margin: 0.15rem 0 0.65rem;
+}
+
+.status.is-cancelled {
+  display: inline-block;
+  width: fit-content;
+  padding: 0.15rem 0.7rem;
+  border: 1px solid var(--hope-full-edge);
+  border-radius: 999px;
+  background: var(--hope-full);
+  color: var(--hope-ink);
+}
+
+.manage-record {
+  position: relative;
+  margin-top: 0.85rem;
+  padding: 1.15rem 1.25rem 1.25rem;
+  background: var(--hope-blue-100);
+  border-radius: 1.75rem;
+  box-shadow: var(--hope-shadow);
+}
+
+.manage-follow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  margin-top: 1.15rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid var(--hope-border-2);
+}
+
+.manage-follow:has(> :only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.manage-follow > .manage-action,
+.manage-follow > .hint {
+  min-width: 0;
+  margin: 0;
+  padding: 0 1.35rem;
+}
+
+.manage-follow > :first-child {
+  padding-left: 0;
+}
+
+.manage-follow > :only-child {
+  padding-right: 0;
+}
+
+.manage-follow > :last-child:not(:only-child) {
+  padding-right: 0;
+  border-left: 1px solid var(--hope-border-2);
+}
+
+.manage-record .move-form {
+  margin: 0;
+}
+
+.manage-follow .move-form {
+  gap: 0.55rem;
+}
+
+.manage-follow .hint,
+.manage-follow .field-error {
+  margin: 0;
+}
+
+.manage-action-row {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.manage-follow .manage-action-row label,
+.manage-follow .manage-action-row select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.manage-follow .manage-action-row button {
+  width: 7.5rem;
+  min-height: 48px;
+}
+
+.manage > .move-form {
+  max-width: none;
+  margin-top: 1rem;
+  padding: 1.15rem 1.25rem 1.25rem;
+  background: var(--hope-blue-100);
+  border-radius: 1.75rem;
+  box-shadow: var(--hope-shadow);
+}
+
+.manage .cancel-form,
+.manage-actions {
+  max-width: none;
+  margin-top: 1rem;
+}
+
+.manage .error {
+  margin: 0.5rem 0 0;
+}
+
+.manage-tools {
+  position: absolute;
+  z-index: 2;
+  top: 1.05rem;
+  right: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+}
+
+.manage-cancel {
+  margin: 0;
+}
+
+.manage-x {
+  width: 2.5rem;
+  height: 2.5rem;
+  min-height: 2.5rem;
+  padding: 0;
+  border-color: var(--hope-border);
+  background: #fff;
+  box-shadow: none;
+}
+
+.manage-x::before {
+  background: var(--hope-yellow);
+}
+
+.manage-x span {
+  position: relative;
+  width: 0.7rem;
+  height: 0.7rem;
+  font-size: 0;
+}
+
+.manage-x span::before,
+.manage-x span::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0.7rem;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.manage-x span::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.manage-x span::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.manage-menu {
+  position: relative;
+}
+
+.manage-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.5rem;
+  padding: 0.2rem 0.8rem;
+  list-style: none;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid var(--hope-border-2);
+  border-radius: 999px;
+  font-weight: 650;
+}
+
+.manage-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.manage-menu > summary::marker {
+  content: "";
+}
+
+.manage-menu > summary::after {
+  content: "";
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-0.12rem) rotate(45deg);
+}
+
+.manage-menu[open] > summary::after {
+  transform: translateY(0.1rem) rotate(225deg);
+}
+
+.manage-menu-panel {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  display: flex;
+  width: max-content;
+  margin: 0;
+  padding: 0.35rem 0.6rem;
+  background: #fff;
+  border-radius: 0.75rem;
+  box-shadow: var(--hope-shadow);
+}
+
+.manage-menu-panel .check {
+  min-height: 0;
+  gap: 0.4rem;
+}
+
+.manage-menu-panel .check input {
+  accent-color: var(--hope-blue-quiet-ink);
+}
+
 .signup-board {
   margin-top: 1.25rem;
 }
@@ -786,7 +1025,7 @@ main a:hover {
 
 .day-card {
   overflow: hidden;
-  background: var(--hope-blue-50);
+  background: #fff;
   border-radius: 1.75rem;
   box-shadow: var(--hope-shadow);
   container: day / inline-size;
@@ -848,7 +1087,7 @@ main a:hover {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: var(--hope-blue-50);
+  background: #fff;
 }
 
 .shift-pane.is-ended::after {
@@ -1776,15 +2015,20 @@ article.shift-card {
 }
 
 .details {
-  margin: 1.25rem 0;
-  padding: 0.4rem 1.15rem 0.9rem;
-  background: var(--hope-blue-100);
-  border-radius: 1.5rem;
-  box-shadow: var(--hope-shadow);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1.5rem;
+  margin: 0;
+  padding: 0;
 }
 
 .details div {
-  margin: 0.7rem 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.details .is-wide {
+  grid-column: 1 / -1;
 }
 
 .details dt {
@@ -1793,6 +2037,7 @@ article.shift-card {
 
 .details dd {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .hp {
@@ -2083,11 +2328,22 @@ html:has(#signup-dialog[open]) {
   margin: 0;
 }
 
-.confirm-form h2 {
+.confirm-form h2,
+.confirm-card > h2 {
   margin: 0 1.8rem 0.1rem 0;
   font-size: 1.2rem;
   line-height: 1.3;
   overflow-wrap: anywhere;
+}
+
+.confirm-card > p {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+#manage-cancel-dialog .confirm-card {
+  width: min(28rem, 100%);
 }
 
 .confirm-form p,
@@ -3753,6 +4009,38 @@ button.btn-quiet::before {
 
   .manage-actions {
     grid-template-columns: 1fr;
+  }
+
+  .details {
+    grid-template-columns: 1fr;
+  }
+
+  .manage-follow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .manage-follow > .manage-action,
+  .manage-follow > .hint {
+    padding: 0;
+  }
+
+  .manage-follow > :last-child:not(:only-child) {
+    margin-top: 1.15rem;
+    padding-top: 1.15rem;
+    border-top: 1px solid var(--hope-border-2);
+    border-left: 0;
+  }
+
+  .manage-follow .manage-action-row button {
+    width: 100%;
+  }
+
+  .manage-record:has(.manage-tools) {
+    padding-top: 4.35rem;
+  }
+
+  .manage-record:has(.manage-tools) .details {
+    padding-right: 0;
   }
 
   .signup-form button,
