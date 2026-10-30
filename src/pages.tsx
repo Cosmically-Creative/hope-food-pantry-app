@@ -375,6 +375,7 @@ export function ManagePage(props: {
   note?: string;
 }) {
   const signup = props.signup;
+  const party = props.party;
   const cancelled = signup.status !== 'confirmed';
   return (
     <article class="manage">
@@ -434,22 +435,22 @@ export function ManagePage(props: {
             </div>
           ) : null}
         </dl>
-        {props.party || props.switches ? (
+        {party || props.switches ? (
           <div class="manage-follow">
-            {props.party ? (
-              <form class="move-form manage-action" method="post" action={props.party.action}>
-                <input type="hidden" name="party_token" value={props.party.token} />
+            {party ? (
+              <form class="move-form manage-action" method="post" action={party.action}>
+                <input type="hidden" name="party_token" value={party.token} />
                 <div class="manage-action-row">
                   <label for="manage-partySize">
                     How many people?
                     <select
                       id="manage-partySize"
                       name="party_size"
-                      aria-invalid={props.party.error ? 'true' : undefined}
-                      aria-describedby={props.party.error ? 'manage-partySize-hint manage-partySize-error' : 'manage-partySize-hint'}
+                      aria-invalid={party.error ? 'true' : undefined}
+                      aria-describedby={party.error ? 'manage-partySize-hint manage-partySize-error' : 'manage-partySize-hint'}
                     >
-                      {partyChoices(props.party.remaining).map((count) => (
-                        <option key={count} value={String(count)} selected={props.party.value === String(count) ? true : undefined}>
+                      {partyChoices(party.remaining).map((count) => (
+                        <option key={count} value={String(count)} selected={party.value === String(count) ? true : undefined}>
                           {partyChoiceLabel(count)}
                         </option>
                       ))}
@@ -460,9 +461,9 @@ export function ManagePage(props: {
                 <p class="hint" id="manage-partySize-hint">
                   Including you. This holds that many spots, and the name stays the same.
                 </p>
-                {props.party.error ? (
+                {party.error ? (
                   <p class="field-error" id="manage-partySize-error">
-                    {props.party.error}
+                    {party.error}
                   </p>
                 ) : null}
               </form>
