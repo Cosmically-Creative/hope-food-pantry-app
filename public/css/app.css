@@ -3327,6 +3327,7 @@ button.btn-quiet::before {
   margin-left: auto;
   min-height: 1.7rem;
   padding: 0.12rem 0.7rem;
+  border: 1px solid transparent;
   border-radius: 999px;
   font-size: 0.82rem;
   font-weight: 650;
@@ -3336,28 +3337,33 @@ button.btn-quiet::before {
 
 .need-pill.is-open {
   background: var(--hope-yellow);
+  border-color: var(--hope-gold);
   color: #6a5314;
 }
 
 .need-pill.is-needs {
   background: var(--hope-full);
+  border-color: #ebd1cd;
   color: #8a3d36;
 }
 
 .need-pill.is-public {
   background: var(--hope-blue-quiet);
+  border-color: #c5dcec;
   color: var(--hope-blue-quiet-ink);
   font-weight: 600;
 }
 
 .need-pill.is-hidden {
   background: #e6e9ee;
+  border-color: #d6dadf;
   color: #5c6770;
   font-weight: 600;
 }
 
 .need-pill.is-full {
   background: #e3f6e8;
+  border-color: #cde8d5;
   color: #1f7a43;
 }
 
@@ -5256,6 +5262,7 @@ main > .crumb,
   margin-left: auto;
   min-height: 1.7rem;
   padding: 0.12rem 0.7rem;
+  border: 1px solid transparent;
   border-radius: 999px;
   font-size: 0.82rem;
   font-weight: 650;
@@ -5265,21 +5272,25 @@ main > .crumb,
 
 .fill-pill.is-open {
   background: #f8e7b0;
+  border-color: var(--hope-gold);
   color: #8a6414;
 }
 
 .fill-pill.is-full {
   background: #e3f6e8;
+  border-color: #cde8d5;
   color: #1f7a43;
 }
 
 .fill-pill.is-needs {
   background: #fde4e1;
+  border-color: #f6d2ce;
   color: #b42318;
 }
 
 .fill-pill.is-cancelled {
   background: #eef1f4;
+  border-color: #dde1e5;
   color: #5c6770;
 }
 
