@@ -96,6 +96,52 @@ export function renderSwitched(input: {
   return changedLetter(input, `Your signup was switched to ${role}`, 'You switched this signup to a different shift.');
 }
 
+/** One letter for every upcoming shift at a new place. It does not include a private signup link. */
+export function renderLocationChange(input: {
+  volunteerName: string;
+  eventTitle: string;
+  location: string;
+  shifts: Array<{ role: string; whenLabel: string }>;
+  replyTo: string;
+}): RenderedMail {
+  const name = singleLine(input.volunteerName);
+  const eventTitle = singleLine(input.eventTitle);
+  const place = singleLine(input.location);
+  const subject = `The location for ${eventTitle} has changed`;
+  const hello = place
+    ? `The location for ${eventTitle} is now ${place}. This applies to the shifts below. Your signup links still work.`
+    : `The address for ${eventTitle} was removed. This applies to the shifts below. Your signup links still work.`;
+  const shifts = input.shifts.map((shift) => `${singleLine(shift.role)}: ${singleLine(shift.whenLabel)}`);
+  const greeting = `Hello ${name},`;
+  const lines = [
+    greeting,
+    '',
+    hello,
+    '',
+    ...shifts,
+    '',
+    `Replies go to ${input.replyTo}.`,
+    '',
+    'Hope Food Pantry',
+  ];
+  const items = shifts.map((line) => `<li>${escapeHtml(line)}</li>`).join('');
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin:0;padding:24px;background:#f4fafd;color:#222;font-family:sans-serif;line-height:1.5">
+<p>${escapeHtml(greeting)}</p>
+<p>${escapeHtml(hello)}</p>
+<ul>${items}</ul>
+<p>Replies go to ${escapeHtml(input.replyTo)}.</p>
+<p>Hope Food Pantry</p>
+</body>
+</html>`;
+  return { subject, text: lines.join('\n'), html };
+}
+
 function changedLetter(
   input: { volunteerName: string; shift: MailShift; manageUrl: string; replyTo: string; groupSize?: number },
   subject: string,

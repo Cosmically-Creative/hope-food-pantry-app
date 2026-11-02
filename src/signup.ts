@@ -294,18 +294,20 @@ function placeReservation(db: Database.Database, input: ReserveInput, emailNorm:
     mail: input.mail,
     now: input.now,
   });
-  queueCoordinatorNotices(db, {
-    action: 'signup',
-    signupId,
-    shiftId: input.shiftId,
-    shiftVersion: facts.version,
-    volunteerName: input.name,
-    volunteerEmail: emailNorm,
-    groupSize,
-    shift: facts.facts,
-    mail: input.mail,
-    now: input.now,
-  });
+  if (input.audience !== 'coordinator') {
+    queueCoordinatorNotices(db, {
+      action: 'signup',
+      signupId,
+      shiftId: input.shiftId,
+      shiftVersion: facts.version,
+      volunteerName: input.name,
+      volunteerEmail: emailNorm,
+      groupSize,
+      shift: facts.facts,
+      mail: input.mail,
+      now: input.now,
+    });
+  }
   rememberSignupContact(db, { name: input.name, email: emailNorm, phone: input.phone }, input.now);
   input.onReserved?.(signupId);
   return { ok: true, signupId, manageToken, replay: false };

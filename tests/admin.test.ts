@@ -773,6 +773,78 @@ describe('coordinator screens', () => {
     expect(count(db, 'SELECT COUNT(*) AS n FROM shifts')).toBe(3);
   });
 
+  it('shows how many people a location change emails before saving it', async () => {
+    const { app, db } = await buildApp();
+    const cookie = await signIn(app, db);
+    const created = await postForm(app, '/admin/events', cookie, {
+      title: 'Soup Night',
+      slug: 'soup-night',
+      description: 'Bring a spoon.',
+      location: 'Sioux Center, Iowa',
+      tz: 'America/Chicago',
+      published: 'yes',
+    });
+    const eventId = Number(/\/admin\/events\/(\d+)/.exec(created.headers.get('location') ?? '')?.[1]);
+    const shift = await postForm(app, `/admin/events/${eventId}/shifts`, cookie, {
+      role: 'Ladle',
+      date: '2026-10-15',
+      start: '09:00',
+      end: '12:00',
+      capacity: '4',
+    });
+    const shiftId = Number(/\/admin\/shifts\/(\d+)/.exec(shift.headers.get('location') ?? '')?.[1]);
+    const fields = {
+      title: 'Soup Night',
+      slug: 'soup-night',
+      description: 'Bring a spoon.',
+      tz: 'America/Chicago',
+      published: 'yes',
+    };
+
+    const empty = await postForm(app, `/admin/events/${eventId}`, cookie, { ...fields, location: 'Sioux Center, IA' });
+    expect(empty.status).toBe(200);
+    const emptyHtml = await empty.text();
+    expect(emptyHtml).toContain('No one is signed up for a shift that has not ended.');
+    expect(emptyHtml).toContain('0 people');
+    expect(emptyHtml).toContain('Save location');
+    expect(db.prepare('SELECT location AS location FROM events WHERE id = ?').get(eventId)).toEqual({ location: 'Sioux Center, Iowa' });
+
+    const savedEmpty = await postForm(app, `/admin/events/${eventId}`, cookie, {
+      ...fields,
+      location: 'Sioux Center, IA',
+      confirm_location: 'yes',
+    });
+    expect(savedEmpty.status).toBe(303);
+    expect(savedEmpty.headers.get('location')).toBe(`/admin/events/${eventId}?notice=saved`);
+    expect(count(db, "SELECT COUNT(*) AS n FROM outbox WHERE kind = 'location'")).toBe(0);
+
+    const person = reserve(db, shiftId, 'Pat Example', 'pat@example.invalid', 'pat-location');
+    const hash = db.prepare('SELECT manage_token_hash AS hash FROM signups').get();
+    const preview = await postForm(app, `/admin/events/${eventId}`, cookie, { ...fields, location: '409 1st Ave NE' });
+    expect(preview.status).toBe(200);
+    const previewHtml = await preview.text();
+    expect(previewHtml).toContain('1 person');
+    expect(previewHtml).toContain('This emails 1 person about the new location.');
+    expect(previewHtml).toContain('Save and email');
+    expect(previewHtml).toContain('name="confirm_location"');
+    expect(db.prepare('SELECT location AS location FROM events WHERE id = ?').get(eventId)).toEqual({ location: 'Sioux Center, IA' });
+
+    const saved = await postForm(app, `/admin/events/${eventId}`, cookie, {
+      ...fields,
+      location: '409 1st Ave NE',
+      confirm_location: 'yes',
+    });
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get('location')).toBe(`/admin/events/${eventId}?notice=saved-location`);
+    expect(db.prepare('SELECT location AS location FROM events WHERE id = ?').get(eventId)).toEqual({ location: '409 1st Ave NE' });
+    expect(db.prepare('SELECT manage_token_hash AS hash FROM signups').get()).toEqual(hash);
+    expect(count(db, "SELECT COUNT(*) AS n FROM outbox WHERE kind = 'location' AND to_email = 'pat@example.invalid'")).toBe(1);
+    expect(count(db, "SELECT COUNT(*) AS n FROM outbox WHERE kind = 'notice' AND subject LIKE '%location%'")).toBe(0);
+    const page = await (await app.request(`/admin/events/${eventId}?notice=saved-location`, { headers: { cookie } })).text();
+    expect(page).toContain('One email is queued for each person');
+    expect(readManageSignup(db, person.manageToken ?? '', NOW)?.status).toBe('confirmed');
+  });
+
   it('treats an expired session as signed out', async () => {
     const { app, db } = await buildApp();
     const cookie = await signIn(app, db);

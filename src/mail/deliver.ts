@@ -22,7 +22,7 @@ type ClaimedRow = {
 };
 
 /**
- * Claims due confirmation, change, cancellation, reminder, sign-in, and coordinator notice mail, then sends outside the database transaction.
+ * Claims due confirmation, change, cancellation, reminder, sign-in, coordinator notice, and location mail, then sends outside the database transaction.
  * An expired sending lease becomes delivery_unknown and is not sent again.
  * sent_at means the provider accepted the message.
  */
@@ -72,7 +72,7 @@ function claimNext(db: Database.Database, now: string): ClaimedRow | null {
       .prepare(
         `SELECT id AS id
          FROM outbox
-         WHERE status = 'pending' AND send_after <= ? AND kind IN ('confirmation', 'cancelled', 'changed', 'reminder', 'magic_link', 'notice')
+         WHERE status = 'pending' AND send_after <= ? AND kind IN ('confirmation', 'cancelled', 'changed', 'reminder', 'magic_link', 'notice', 'location')
          ORDER BY id
          LIMIT 1`,
       )
@@ -98,6 +98,7 @@ function claimNext(db: Database.Database, now: string): ClaimedRow | null {
 function obsoleteReason(db: Database.Database, row: ClaimedRow, now: string): string | null {
   if (row.kind === 'magic_link') return magicLinkReason(db, row, now);
   if (row.kind === 'notice') return noticeReason(db, row);
+  if (row.kind === 'location') return locationReason(db, row, now);
   if (row.signup_id === null) return 'The signup is no longer available.';
   const signup = db
     .prepare(
@@ -162,6 +163,34 @@ function magicLinkReason(db: Database.Database, row: ClaimedRow, now: string): s
     return 'The sign-in link is no longer available.';
   }
   return null;
+}
+
+function locationReason(db: Database.Database, row: ClaimedRow, now: string): string | null {
+  const ids = locationSignupIds(row.dedupe_key);
+  if (ids.length === 0) return 'The signup is no longer available.';
+  const marks = ids.map(() => '?').join(', ');
+  const left = db
+    .prepare(
+      `SELECT COUNT(*) AS n
+       FROM signups su
+       JOIN shifts s ON s.id = su.shift_id
+       WHERE su.id IN (${marks})
+         AND su.status = 'confirmed'
+         AND su.anonymized_at IS NULL
+         AND su.name IS NOT NULL
+         AND su.email_norm IS NOT NULL
+         AND s.cancelled = 0
+         AND s.ends_at_utc > ?`,
+    )
+    .get(...ids, now) as { n: number };
+  if (Number(left.n) === 0) return 'The signup is no longer available.';
+  return null;
+}
+
+function locationSignupIds(dedupeKey: string): number[] {
+  const match = /:s([1-9][0-9]*(?:\.[1-9][0-9]*)*)$/.exec(dedupeKey);
+  if (!match?.[1]) return [];
+  return match[1].split('.').map((value) => Number(value)).filter((id) => Number.isSafeInteger(id) && id > 0);
 }
 
 function reminderReason(

@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { moveSignup, switchSignup, updateShift } from '../src/admin/store.js';
+import { addWalkIn, cancelShift, moveSignup, switchSignup, updateEvent, updateShift } from '../src/admin/store.js';
+import { queueDueReminders } from '../src/reminders.js';
 import { deactivateAdmin } from '../src/admins.js';
 import { recoverCoordinator } from '../src/auth/recover.js';
 import { loadConfig } from '../src/config.js';
@@ -92,7 +93,7 @@ describe('coordinator roster notices', () => {
     expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'notice'`).get()).toEqual({ n: 2 });
   });
 
-  it('tells coordinators when a signup is switched, moved, or the shift changes', async () => {
+  it('tells coordinators when a volunteer switches, and stays quiet when a coordinator moves or edits a shift', async () => {
     const { db, eventId, shiftId } = await buildDb();
     const ada = insertCoordinator(db, 'ada@example.invalid', 'Ada Admin', 1);
     const other = insertShift(db, eventId, 'Distribution');
@@ -110,9 +111,8 @@ describe('coordinator roster notices', () => {
     if (!movedSource.ok) throw new Error('Move signup was not saved.');
     const moved = moveSignup(db, ada, movedSource.signupId, other, 'move-op', NOW, MAIL);
     expect(moved.ok).toBe(true);
-    const moveNotice = db.prepare(`SELECT body_text AS body_text FROM outbox WHERE kind = 'notice' AND subject = 'Sam Example was moved to Distribution'`).get() as { body_text: string };
-    expect(moveNotice.body_text).toContain('was moved from Sorting (');
-    expect(moveNotice.body_text).toContain('to Distribution');
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'notice' AND subject = 'Sam Example was moved to Distribution'`).get()).toEqual({ n: 0 });
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'changed' AND to_email = 'sam@example.invalid'`).get()).toEqual({ n: 1 });
 
     const changed = updateShift(db, ada, other, {
       role: 'Packing',
@@ -122,11 +122,8 @@ describe('coordinator roster notices', () => {
       capacity: 4,
     }, NOW, MAIL);
     expect(changed.ok).toBe(true);
-    const changeNotices = db.prepare(`SELECT subject AS subject FROM outbox WHERE kind = 'notice' AND subject LIKE '%shift changed' ORDER BY subject`).all();
-    expect(changeNotices).toEqual([
-      { subject: "Pat Review's Packing shift changed" },
-      { subject: "Sam Example's Packing shift changed" },
-    ]);
+    expect(db.prepare(`SELECT subject AS subject FROM outbox WHERE kind = 'notice' AND subject LIKE '%shift changed'`).all()).toEqual([]);
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'changed' AND subject LIKE 'Your Packing shift has changed'`).get()).toEqual({ n: 2 });
     expect(db.prepare(`SELECT status FROM outbox WHERE kind = 'notice' AND subject = 'Pat Review signed up for Sorting'`).get()).toEqual({
       status: 'pending',
     });
@@ -218,6 +215,119 @@ describe('coordinator roster notices', () => {
     });
   });
 
+  it('does not email a coordinator about a walk-in or a shift they cancel', async () => {
+    const { db, shiftId } = await buildDb();
+    const ada = insertCoordinator(db, 'ada@example.invalid', 'Ada Admin', 1);
+    db.prepare('UPDATE shifts SET capacity = 6 WHERE id = ?').run(shiftId);
+    const added = addWalkIn(db, ada, {
+      shiftId,
+      name: 'Pat Review',
+      email: 'pat.review@example.invalid',
+      phone: '712-555-0100',
+      notes: null,
+      operationId: 'walk-in',
+      now: NOW,
+      mail: MAIL,
+    });
+    expect(added.ok).toBe(true);
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'notice'`).get()).toEqual({ n: 0 });
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'confirmation' AND to_email = 'pat.review@example.invalid'`).get()).toEqual({ n: 1 });
+
+    for (let index = 0; index < 5; index += 1) {
+      const saved = reserveSignup(db, reservation(shiftId, {
+        name: `Person ${index}`,
+        email: `person${index}@example.invalid`,
+        operationId: `person-${index}`,
+      }));
+      expect(saved.ok).toBe(true);
+    }
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'notice'`).get()).toEqual({ n: 5 });
+    const cancelled = cancelShift(db, ada, shiftId, NOW, MAIL);
+    expect(cancelled).toEqual({ ok: true, already: false, mailed: 6 });
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'notice'`).get()).toEqual({ n: 5 });
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'cancelled' AND status = 'pending'`).get()).toEqual({ n: 6 });
+  });
+
+  it('emails each person once when the location changes and leaves private links in place', async () => {
+    const { db, eventId, shiftId } = await buildDb();
+    const ada = insertCoordinator(db, 'ada@example.invalid', 'Ada Admin', 1);
+    const second = insertShift(db, eventId, 'Sorting', '2026-10-22T14:00:00.000Z', '2026-10-22T17:00:00.000Z');
+    const third = insertShift(db, eventId, 'Sorting', '2026-10-29T14:00:00.000Z', '2026-10-29T17:00:00.000Z');
+    const people = [
+      ['Pat Review', 'pat@example.invalid'],
+      ['Sam Example', 'sam@example.invalid'],
+      ['Kim Example', 'kim@example.invalid'],
+    ] as const;
+    const tokens = new Map<string, string>();
+    for (const shift of [shiftId, second, third]) {
+      for (const [name, email] of people) {
+        const saved = reserveSignup(db, reservation(shift, { name, email, operationId: `${email}-${shift}` }));
+        expect(saved.ok).toBe(true);
+        if (saved.ok && saved.manageToken && shift === shiftId) tokens.set(email, saved.manageToken);
+      }
+    }
+    const hashes = db.prepare('SELECT id, manage_token_hash AS hash FROM signups ORDER BY id').all();
+    expect(queueDueReminders(db, MAIL, 'location-secret', '2026-10-15T12:00:00.000Z')).toEqual({ queued: 3, suppressed: 0 });
+    const noticesBefore = db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'notice'`).get();
+
+    const saved = updateEvent(db, ada, eventId, {
+      title: 'Weekly pantry',
+      slug: 'weekly-pantry',
+      description: 'Bring a hat.',
+      location: 'Sioux Center, IA',
+      tz: 'America/Chicago',
+      published: true,
+    }, '2026-10-15T12:00:00.000Z', MAIL, 'location-secret');
+    expect(saved).toEqual({ ok: true, id: eventId, mailed: 3 });
+    expect(db.prepare('SELECT id, manage_token_hash AS hash FROM signups ORDER BY id').all()).toEqual(hashes);
+    expect(db.prepare('SELECT version AS version FROM shifts ORDER BY id').all()).toEqual([
+      { version: 1 },
+      { version: 1 },
+      { version: 1 },
+    ]);
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'notice'`).get()).toEqual(noticesBefore);
+
+    const letters = db.prepare(`SELECT to_email, body_text, body_html FROM outbox WHERE kind = 'location' ORDER BY to_email`).all() as Array<{
+      to_email: string;
+      body_text: string;
+      body_html: string;
+    }>;
+    expect(letters.map((row) => row.to_email)).toEqual(['kim@example.invalid', 'pat@example.invalid', 'sam@example.invalid']);
+    const pat = letters.find((row) => row.to_email === 'pat@example.invalid');
+    if (!pat) throw new Error('Pat did not get a location email.');
+    expect(pat.body_text).toContain('The location for Weekly pantry is now Sioux Center, IA.');
+    expect(pat.body_text).toContain('October 15, 2026');
+    expect(pat.body_text).toContain('October 22, 2026');
+    expect(pat.body_text).toContain('October 29, 2026');
+    expect(pat.body_text).not.toContain('/m/');
+    expect(pat.body_html).not.toContain('/m/');
+    expect(pat.body_text.match(/October/g)).toHaveLength(3);
+
+    const confirmation = db.prepare(`SELECT body_text AS body_text FROM outbox WHERE kind = 'confirmation' AND to_email = 'pat@example.invalid' ORDER BY id LIMIT 1`).get() as { body_text: string };
+    expect(confirmation.body_text).toContain('Sioux Center, IA');
+    expect(confirmation.body_text).toContain(`/m/${tokens.get('pat@example.invalid')}`);
+    expect(confirmation.body_text).not.toContain('Sioux Center, Iowa');
+    const reminder = db.prepare(`SELECT body_text AS body_text FROM outbox WHERE kind = 'reminder' AND status = 'pending' AND to_email = 'pat@example.invalid'`).get() as { body_text: string };
+    expect(reminder.body_text).toContain('Sioux Center, IA');
+    expect(reminder.body_text).not.toContain('Sioux Center, Iowa');
+
+    const again = updateEvent(db, ada, eventId, {
+      title: 'Weekly pantry',
+      slug: 'weekly-pantry',
+      description: 'Bring a hat.',
+      location: '409 1st Ave NE',
+      tz: 'America/Chicago',
+      published: true,
+    }, '2026-10-15T12:30:00.000Z', MAIL, 'location-secret');
+    expect(again).toEqual({ ok: true, id: eventId, mailed: 3 });
+    expect(db.prepare(`SELECT status, last_error FROM outbox WHERE kind = 'location' AND body_text LIKE '%Sioux Center, IA%' LIMIT 1`).get()).toEqual({
+      status: 'cancelled',
+      last_error: 'A newer location email replaced this message.',
+    });
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'location' AND status = 'pending'`).get()).toEqual({ n: 3 });
+    expect(db.prepare('SELECT id, manage_token_hash AS hash FROM signups ORDER BY id').all()).toEqual(hashes);
+  });
+
   it('stops a waiting notice when an administrator is removed or the sign-in address is replaced', async () => {
     const { db, shiftId } = await buildDb();
     const ada = insertCoordinator(db, 'ada@example.invalid', 'Ada Admin', 1);
@@ -255,12 +365,18 @@ async function buildDb() {
   return { db, eventId, shiftId: insertShift(db, eventId, 'Sorting') };
 }
 
-function insertShift(db: Awaited<ReturnType<typeof openAppDatabase>>, eventId: number, role: string): number {
+function insertShift(
+  db: Awaited<ReturnType<typeof openAppDatabase>>,
+  eventId: number,
+  role: string,
+  startsAt = '2026-10-15T14:00:00.000Z',
+  endsAt = '2026-10-15T17:00:00.000Z',
+): number {
   return Number(
     db.prepare(
       `INSERT INTO shifts (event_id, role, starts_at_utc, ends_at_utc, capacity, notes, cancelled)
-       VALUES (?, ?, '2026-10-15T14:00:00.000Z', '2026-10-15T17:00:00.000Z', 4, '', 0)`,
-    ).run(eventId, role).lastInsertRowid,
+       VALUES (?, ?, ?, ?, 4, '', 0)`,
+    ).run(eventId, role, startsAt, endsAt).lastInsertRowid,
   );
 }
 

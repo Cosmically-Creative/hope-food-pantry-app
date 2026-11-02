@@ -19,6 +19,7 @@ import {
   cancelShift,
   cancelShifts,
   cancelSignupAsCoordinator,
+  countLocationRecipients,
   createEvent,
   createShift,
   createTemplate,
@@ -49,6 +50,7 @@ import {
   AdminHome,
   EventEditor,
   eventRemovalPrompt,
+  locationChangePrompt,
   LoginConfirmPage,
   LoginPage,
   MessagePage,
@@ -762,6 +764,7 @@ function showEvent(
   eventId = idFrom(c),
   scheduleNote?: string,
   notice?: string,
+  values?: EventValues,
 ) {
   const session = requireSession(c, services);
   if (session instanceof Response) return session;
@@ -776,14 +779,16 @@ function showEvent(
       heading={event.title}
       action={appPath(services.config, `/admin/events/${event.id}`)}
       csrf={session.csrf}
-      values={{
-        title: event.title,
-        slug: event.slug,
-        description: event.description,
-        location: event.location,
-        tz: event.tz,
-        published: event.published,
-      }}
+      values={
+        values ?? {
+          title: event.title,
+          slug: event.slug,
+          description: event.description,
+          location: event.location,
+          tz: event.tz,
+          published: event.published,
+        }
+      }
       event={event}
       error={error}
       notice={notice ?? knownNotice(c.req.query('notice'))}
@@ -803,10 +808,39 @@ async function submitEvent(c: Context, services: AdminServices): Promise<Respons
   const values = eventValuesFrom(session.body, services.config.defaultTimeZone);
   const parsed = parseEvent(values);
   if (!parsed.ok) return showEventEditor(c, services, session, id, values, parsed.error);
+  const current = services.db.prepare('SELECT location AS location FROM events WHERE id = ?').get(id) as { location: string } | undefined;
+  if (!current) return missing(c, services);
+  if (current.location !== parsed.value.location && textField(session.body, 'confirm_location') !== 'yes') {
+    const people = countLocationRecipients(services.db, id, services.now());
+    return showEvent(
+      c,
+      services,
+      undefined,
+      200,
+      {
+        action: appPath(services.config, `/admin/events/${id}`),
+        ...locationChangePrompt(people, parsed.value.location),
+        fields: locationConfirmFields(parsed.value),
+      },
+      id,
+      undefined,
+      undefined,
+      values,
+    );
+  }
   try {
-    const saved = updateEvent(services.db, session.coordinatorId, id, parsed.value, services.now(), mailIdentity(services.db, services.config));
+    const saved = updateEvent(
+      services.db,
+      session.coordinatorId,
+      id,
+      parsed.value,
+      services.now(),
+      mailIdentity(services.db, services.config),
+      services.config.sessionSecret,
+    );
     if (!saved.ok) return showEventEditor(c, services, session, id, values, saved.error);
-    return c.redirect(appPath(services.config, `/admin/events/${id}?notice=saved`), 303);
+    const notice = saved.mailed > 0 ? 'saved-location' : 'saved';
+    return c.redirect(appPath(services.config, `/admin/events/${id}?notice=${notice}`), 303);
   } catch (err) {
     return saveFailed(c, services, session, err);
   }
@@ -1606,6 +1640,19 @@ function localToday(tz: string, now: string): string {
   return Temporal.Instant.from(now).toZonedDateTimeISO(tz).toPlainDate().toString();
 }
 
+function locationConfirmFields(values: EventValues): Record<string, string> {
+  const fields: Record<string, string> = {
+    title: values.title,
+    slug: values.slug,
+    description: values.description,
+    location: values.location,
+    tz: values.tz,
+    confirm_location: 'yes',
+  };
+  if (values.published) fields.published = 'yes';
+  return fields;
+}
+
 function blankEvent(tz: string): EventValues {
   return { title: '', slug: '', description: '', location: '', tz, published: false };
 }
@@ -1614,6 +1661,7 @@ function knownNotice(value: string | undefined): string | undefined {
   if (!value) return undefined;
   if (
     value === 'saved' ||
+    value === 'saved-location' ||
     value === 'signup-cancelled' ||
     value === 'already-cancelled' ||
     value === 'shift-cancelled' ||

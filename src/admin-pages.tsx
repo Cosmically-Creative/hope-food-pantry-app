@@ -38,6 +38,7 @@ export type ConfirmPrompt = {
   note?: string;
   submit?: string;
   error?: string;
+  fields?: Record<string, string>;
 };
 
 const SHIFT_DELETE_BODY = 'This deletes the shift. It does not send email.';
@@ -100,6 +101,24 @@ export function signupCancelPrompt(signup: { name: string | null; status: string
     title: `Cancel ${signup.name ?? 'this signup'}`,
     body: PERSON_CANCEL_BODY,
     submit: 'Cancel signup',
+  };
+}
+
+export function locationChangePrompt(people: number, location: string): Omit<ConfirmPrompt, 'action'> {
+  const place = location.trim();
+  const count = people === 1 ? '1 person' : `${people} people`;
+  const body =
+    people === 0
+      ? 'No one is signed up for a shift that has not ended. This does not send email.'
+      : people === 1
+        ? 'This emails 1 person about the new location. Their signup link stays the same.'
+        : `This emails ${people} people about the new location. Each person gets one email. Their signup links stay the same.`;
+  return {
+    title: 'Change the location',
+    detail: count,
+    note: place ? `New location: ${place}` : 'The address will be removed.',
+    body,
+    submit: people === 0 ? 'Save location' : 'Save and email',
   };
 }
 
@@ -897,7 +916,7 @@ export function EventEditor(props: {
             <strong>Event details</strong>
             <span>{event.location.trim() || 'No address yet'}</span>
           </p>
-          <details class="event-edit" open={props.error ? true : undefined}>
+          <details class="event-edit" open={props.error || props.confirm ? true : undefined}>
             <summary>
               Edit details
               <span class="edit-chevron" aria-hidden="true" />
@@ -1374,6 +1393,11 @@ function ConfirmDialog(props: { config: AppConfig; csrf: string; prompt?: Confir
           </form>
           <form method="post" id="confirm-form" class="confirm-form" action={prompt?.action ?? ''} data-keep-place="">
             <input type="hidden" name="csrf" value={props.csrf} />
+            {prompt?.fields
+              ? Object.entries(prompt.fields).map(([name, value]) => (
+                  <input type="hidden" name={name} value={value} data-picked="" />
+                ))
+              : null}
             <h2 id="confirm-title">{prompt?.title ?? 'Remove'}</h2>
             <p class="confirm-detail" id="confirm-detail" hidden={prompt?.detail ? undefined : true}>
               {prompt?.detail ?? ''}
@@ -1787,7 +1811,7 @@ function EventForm(props: {
         <label>
           Location
           <input name="location" type="text" value={props.values.location} />
-          <span class="hint">Changing the location emails people on shifts that have not ended.</span>
+          <span class="hint">Changing the location emails each person once, for every shift that has not ended. Signup links stay the same. Saving shows how many people that reaches.</span>
         </label>
       )}
       <label class="check">
@@ -2142,6 +2166,7 @@ function spotLabel(shift: Pick<AdminShiftSummary, 'capacity' | 'occupied' | 'can
 
 const NOTICES: Record<string, string> = {
   saved: 'Saved.',
+  'saved-location': 'Saved. One email is queued for each person on a shift that has not ended. Their signup links still work.',
   'signup-cancelled': 'The signup is cancelled. A cancellation email is queued.',
   'already-cancelled': 'That signup was already cancelled.',
   'shift-cancelled': 'The shift is cancelled and off this list. Cancellation emails are queued.',

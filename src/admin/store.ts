@@ -3,7 +3,8 @@ import { Temporal } from '@js-temporal/polyfill';
 import type Database from 'better-sqlite3';
 import type { EventInput, ShiftInput, TemplateInput } from './forms.js';
 import { writeAudit } from '../auth/audit.js';
-import { cancelPendingConfirmations, cancelPendingReminders, queueCancellation, queueChanged, queueCoordinatorNotices } from '../mail/queue.js';
+import { cancelPendingConfirmations, cancelPendingReminders, queueCancellation, queueChanged, queueCoordinatorNotices, queueLocationChange, rewritePendingPlace } from '../mail/queue.js';
+import { refreshPendingReminders } from '../reminders.js';
 import type { MailShift } from '../mail/templates.js';
 import type { MailIdentity } from '../mail/types.js';
 import { confirmedPersonOnShift, confirmedPersonShiftIds, reserveSignup, type ReserveInput, type ReserveResult } from '../signup.js';
@@ -361,6 +362,7 @@ export function updateEvent(
   input: EventInput,
   now: string,
   mail: MailIdentity,
+  reminderSecret?: string,
 ): SaveResult {
   const zone = timeZone(input.tz);
   if (!zone.ok) return zone;
@@ -377,10 +379,7 @@ export function updateEvent(
       ).run(input.slug, input.title, input.description, input.location, zone.tz, input.published ? 1 : 0, id);
       let mailed = 0;
       if (existing.location !== input.location) {
-        const shifts = db
-          .prepare('SELECT id AS id FROM shifts WHERE event_id = ? AND cancelled = 0 AND ends_at_utc > ?')
-          .all(id, now) as Array<{ id: number }>;
-        for (const shift of shifts) mailed += bumpAndNotify(db, shift.id, now, mail);
+        mailed = notifyLocationChange(db, id, existing.location, input.location, now, mail, reminderSecret);
       }
       writeAudit(db, coordinatorId, 'event.update', { eventId: id, published: input.published ? 1 : 0, mailed }, now);
       return { ok: true as const, id, mailed };
@@ -1498,20 +1497,22 @@ function relocate(
     },
     options.audience === 'volunteer' ? 'switch' : 'move',
   );
-  const previous = mailShift(db, source.shift_id);
-  queueCoordinatorNotices(db, {
-    action: options.audience === 'volunteer' ? 'switch' : 'move',
-    signupId: newSignupId,
-    shiftId: destination.id,
-    shiftVersion: shift.version,
-    volunteerName: source.name,
-    volunteerEmail: source.email_norm,
-    groupSize,
-    shift: shift.facts,
-    fromShift: previous?.facts,
-    mail,
-    now,
-  });
+  if (options.audience === 'volunteer') {
+    const previous = mailShift(db, source.shift_id);
+    queueCoordinatorNotices(db, {
+      action: 'switch',
+      signupId: newSignupId,
+      shiftId: destination.id,
+      shiftVersion: shift.version,
+      volunteerName: source.name,
+      volunteerEmail: source.email_norm,
+      groupSize,
+      shift: shift.facts,
+      fromShift: previous?.facts,
+      mail,
+      now,
+    });
+  }
   writeAudit(db, options.coordinatorId, options.action, {
     signupId: source.id,
     fromShiftId: source.shift_id,
@@ -1672,18 +1673,6 @@ function bumpAndNotify(db: Database.Database, shiftId: number, now: string, mail
       mail,
       now,
     });
-    queueCoordinatorNotices(db, {
-      action: 'change',
-      signupId: person.id,
-      shiftId: person.shift_id,
-      shiftVersion: shift.version,
-      volunteerName: person.name,
-      volunteerEmail: person.email_norm,
-      groupSize: Number(person.group_size),
-      shift: shift.facts,
-      mail,
-      now,
-    });
     mailed += 1;
   }
   return mailed;
@@ -1731,19 +1720,109 @@ function cancelConfirmedPerson(db: Database.Database, person: PersonRow, now: st
     now,
     linkNote: REPLACED_LINK,
   });
-  queueCoordinatorNotices(db, {
-    action: 'cancel',
-    signupId: person.id,
-    shiftId: person.shift_id,
-    shiftVersion: shift.version,
-    volunteerName: person.name,
-    volunteerEmail: person.email_norm,
-    groupSize: Number(person.group_size),
-    shift: shift.facts,
-    mail,
-    now,
-  });
   return issued.token;
+}
+
+/** People with a confirmed signup on a shift that has not ended. The same person on several weeks counts once. */
+export function countLocationRecipients(db: Database.Database, eventId: number, now: string): number {
+  return locationRecipients(db, eventId, now).length;
+}
+
+function notifyLocationChange(
+  db: Database.Database,
+  eventId: number,
+  previousLocation: string,
+  nextLocation: string,
+  now: string,
+  mail: MailIdentity,
+  reminderSecret: string | undefined,
+): number {
+  const people = locationRecipients(db, eventId, now);
+  const signupIds = people.flatMap((person) => person.signupIds);
+  rewritePendingPlace(db, signupIds, previousLocation, nextLocation);
+  if (reminderSecret) refreshPendingReminders(db, signupIds, mail, reminderSecret);
+  for (const person of people) {
+    const firstSignup = person.signupIds[0];
+    if (!firstSignup) continue;
+    queueLocationChange(db, {
+      eventId,
+      signupIds: person.signupIds,
+      signupId: firstSignup,
+      shiftId: person.shiftId,
+      volunteerName: person.name,
+      volunteerEmail: person.email,
+      eventTitle: person.eventTitle,
+      location: nextLocation,
+      shifts: person.shifts,
+      mail,
+      now,
+    });
+  }
+  return people.length;
+}
+
+type LocationRecipient = {
+  name: string;
+  email: string;
+  eventTitle: string;
+  signupIds: number[];
+  shiftId: number;
+  shifts: Array<{ role: string; whenLabel: string }>;
+};
+
+function locationRecipients(db: Database.Database, eventId: number, now: string): LocationRecipient[] {
+  const rows = db
+    .prepare(
+      `SELECT su.id AS id, su.name AS name, su.email_norm AS email_norm, su.shift_id AS shift_id,
+              s.role AS role, s.starts_at_utc AS starts_at_utc, s.ends_at_utc AS ends_at_utc,
+              e.title AS title, e.tz AS tz
+       FROM signups su
+       JOIN shifts s ON s.id = su.shift_id
+       JOIN events e ON e.id = s.event_id
+       WHERE s.event_id = ?
+         AND s.cancelled = 0
+         AND s.ends_at_utc > ?
+         AND su.status = 'confirmed'
+         AND su.anonymized_at IS NULL
+         AND su.name IS NOT NULL
+         AND su.email_norm IS NOT NULL
+       ORDER BY s.starts_at_utc, s.id, su.id`,
+    )
+    .all(eventId, now) as Array<{
+    id: number;
+    name: string;
+    email_norm: string;
+    shift_id: number;
+    role: string;
+    starts_at_utc: string;
+    ends_at_utc: string;
+    title: string;
+    tz: string;
+  }>;
+  const groups = new Map<string, LocationRecipient>();
+  for (const row of rows) {
+    const key = `${row.email_norm}\0${row.name.trim().toLowerCase()}`;
+    const start = formatInstantInZone(row.starts_at_utc, row.tz);
+    const end = formatInstantInZone(row.ends_at_utc, row.tz);
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        name: row.name,
+        email: row.email_norm,
+        eventTitle: row.title,
+        signupIds: [],
+        shiftId: row.shift_id,
+        shifts: [],
+      };
+      groups.set(key, group);
+    }
+    group.signupIds.push(row.id);
+    group.shifts.push({
+      role: row.role,
+      whenLabel: `${start.dateLabel}, ${start.timeLabel} to ${end.timeLabel} ${end.abbreviation}`,
+    });
+  }
+  return [...groups.values()];
 }
 
 function replaceManageToken(db: Database.Database, signupId: number, endsAtUtc: string, now: string): string | null {

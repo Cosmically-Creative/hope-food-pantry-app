@@ -1,10 +1,13 @@
+import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { absoluteUrl } from '../url.js';
+import { escapeHtml } from './html.js';
 import {
   renderCancellation,
   renderChanged,
   renderConfirmation,
   renderCoordinatorNotice,
+  renderLocationChange,
   renderMagicLink,
   renderMoved,
   renderSwitched,
@@ -187,6 +190,105 @@ export function cancelPendingReminders(
      SET status = 'cancelled', last_error = ?
      WHERE signup_id = ? AND kind = 'reminder' AND status = 'pending'`,
   ).run(reason, signupId);
+}
+
+/**
+ * One location letter for every upcoming shift this person has on the event.
+ * A newer location letter for the same person replaces one that is still waiting.
+ * The private signup link is not included.
+ */
+export function queueLocationChange(
+  db: Database.Database,
+  input: {
+    eventId: number;
+    signupIds: number[];
+    signupId: number;
+    shiftId: number;
+    volunteerName: string;
+    volunteerEmail: string;
+    eventTitle: string;
+    location: string;
+    shifts: Array<{ role: string; whenLabel: string }>;
+    mail: MailIdentity;
+    now: string;
+  },
+): void {
+  const ids = [...new Set(input.signupIds)].filter((id) => Number.isSafeInteger(id) && id > 0).sort((left, right) => left - right);
+  if (ids.length === 0) return;
+  const person = sha256(`${input.volunteerEmail}\0${input.volunteerName.trim().toLowerCase()}`).slice(0, 16);
+  const place = sha256(input.location).slice(0, 12);
+  const dedupe = `location:e${input.eventId}:${person}:${place}:${input.now}:s${ids.join('.')}`;
+  const queued = db.prepare('SELECT id AS id FROM outbox WHERE dedupe_key = ?').get(dedupe);
+  if (queued) return;
+  db.prepare(
+    `UPDATE outbox
+     SET status = 'cancelled', last_error = ?
+     WHERE kind = 'location' AND status = 'pending' AND to_email = ? AND dedupe_key LIKE ?`,
+  ).run('A newer location email replaced this message.', input.volunteerEmail, `location:e${input.eventId}:${person}:%`);
+  const rendered = renderLocationChange({
+    volunteerName: input.volunteerName,
+    eventTitle: input.eventTitle,
+    location: input.location,
+    shifts: input.shifts,
+    replyTo: input.mail.replyTo,
+  });
+  db.prepare(
+    `INSERT INTO outbox (
+       dedupe_key, signup_id, shift_id, kind, to_email, subject, body_text, body_html,
+       headers_json, send_after, attempts, status, created_at
+     ) VALUES (?, ?, ?, 'location', ?, ?, ?, ?, ?, ?, 0, 'pending', ?)`,
+  ).run(
+    dedupe,
+    input.signupId,
+    input.shiftId,
+    input.volunteerEmail,
+    rendered.subject,
+    rendered.text,
+    rendered.html,
+    JSON.stringify({ From: input.mail.from, 'Reply-To': input.mail.replyTo }),
+    input.now,
+    input.now,
+  );
+}
+
+/** Pending letters still say the previous address. The signup link in each letter stays as it is. */
+export function rewritePendingPlace(db: Database.Database, signupIds: number[], previous: string, next: string): void {
+  const from = previous.trim();
+  const to = next.trim();
+  const ids = [...new Set(signupIds)].filter((id) => Number.isSafeInteger(id) && id > 0);
+  if (!from || from === to || ids.length === 0) return;
+  const marks = ids.map(() => '?').join(', ');
+  const rows = db
+    .prepare(
+      `SELECT id AS id, body_text AS body_text, body_html AS body_html
+       FROM outbox
+       WHERE status = 'pending' AND kind IN ('confirmation', 'changed', 'cancelled') AND signup_id IN (${marks})`,
+    )
+    .all(...ids) as Array<{ id: number; body_text: string; body_html: string }>;
+  const update = db.prepare('UPDATE outbox SET body_text = ?, body_html = ? WHERE id = ? AND status = ?');
+  for (const row of rows) {
+    const text = replacePlaceLine(row.body_text, from, to);
+    const html = replacePlaceHtml(row.body_html, from, to);
+    if (text === row.body_text && html === row.body_html) continue;
+    update.run(text, html, row.id, 'pending');
+  }
+}
+
+function replacePlaceLine(text: string, from: string, to: string): string {
+  return text
+    .split('\n')
+    .flatMap((line) => (line === from ? (to ? [to] : []) : [line]))
+    .join('\n');
+}
+
+function replacePlaceHtml(html: string, from: string, to: string): string {
+  const old = `<br>${escapeHtml(from)}</p>`;
+  const next = to ? `<br>${escapeHtml(to)}</p>` : '</p>';
+  return html.replaceAll(old, next);
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }
 
 function queue(

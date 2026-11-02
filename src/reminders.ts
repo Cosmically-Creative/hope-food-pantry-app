@@ -206,6 +206,62 @@ export function readReminderOffToken(secret: string, token: string): number | nu
   return id;
 }
 
+/** A location change rewrites a reminder that is still waiting so it names the new place. */
+export function refreshPendingReminders(
+  db: Database.Database,
+  signupIds: number[],
+  mail: MailIdentity,
+  secret: string,
+): void {
+  const ids = [...new Set(signupIds)].filter((id) => Number.isSafeInteger(id) && id > 0);
+  if (ids.length === 0) return;
+  const marks = ids.map(() => '?').join(', ');
+  const rows = db
+    .prepare(
+      `SELECT o.id AS outbox_id, su.id AS id, su.name AS name, su.group_size AS group_size,
+              s.role AS role, s.starts_at_utc AS starts_at_utc, s.ends_at_utc AS ends_at_utc,
+              e.title AS title, e.location AS location, e.tz AS tz
+       FROM outbox o
+       JOIN signups su ON su.id = o.signup_id
+       JOIN shifts s ON s.id = su.shift_id
+       JOIN events e ON e.id = s.event_id
+       WHERE o.kind = 'reminder' AND o.status = 'pending' AND o.signup_id IN (${marks})
+         AND su.name IS NOT NULL AND su.anonymized_at IS NULL`,
+    )
+    .all(...ids) as Array<{
+    outbox_id: number;
+    id: number;
+    name: string;
+    group_size: number;
+    role: string;
+    starts_at_utc: string;
+    ends_at_utc: string;
+    title: string;
+    location: string;
+    tz: string;
+  }>;
+  const update = db.prepare(
+    `UPDATE outbox SET subject = ?, body_text = ?, body_html = ? WHERE id = ? AND kind = 'reminder' AND status = 'pending'`,
+  );
+  for (const row of rows) {
+    const start = formatInstantInZone(row.starts_at_utc, row.tz);
+    const end = formatInstantInZone(row.ends_at_utc, row.tz);
+    const rendered = renderReminder({
+      volunteerName: row.name,
+      shift: {
+        role: row.role,
+        eventTitle: row.title,
+        location: row.location,
+        whenLabel: `${start.dateLabel}, ${start.timeLabel} to ${end.timeLabel} ${end.abbreviation}`,
+      },
+      unsubscribeUrl: absoluteUrl(mail, `/u/${issueReminderOffToken(secret, row.id)}`),
+      replyTo: mail.replyTo,
+      groupSize: Number(row.group_size),
+    });
+    update.run(rendered.subject, rendered.text, rendered.html, row.outbox_id);
+  }
+}
+
 /** The later of the signup and the current shift version. A move starts a new signup. */
 function reminderAnchor(createdAt: string, versionAt: string | null): Temporal.Instant {
   const signedUp = Temporal.Instant.from(createdAt);
