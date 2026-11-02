@@ -423,6 +423,7 @@ export function ManagePage(props: {
           <time dateTime={signup.when.date}>{signup.when.dateLabel}</time> {signup.when.timeLabel} {signup.when.abbreviation}
         </p>
         {signup.location ? <p class="location">{signup.location}</p> : null}
+        {!cancelled && signup.ended ? <p>This shift has ended.</p> : null}
       </header>
       {props.note ? <p class="status">{props.note}</p> : null}
       {props.notice ? (
@@ -558,13 +559,13 @@ export function ManagePage(props: {
             </div>
           </div>
         </dialog>
-      ) : (
+      ) : cancelled ? (
         <p>
           {signup.groupSize > 1
             ? `This signup is cancelled. The ${signup.groupSize} spots it held are open for someone else. A cancellation email is queued.`
             : 'This signup is cancelled. The spot is open for someone else. A cancellation email is queued.'}
         </p>
-      )}
+      ) : null}
     </article>
   );
 }

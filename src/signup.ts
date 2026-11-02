@@ -47,6 +47,8 @@ export type ManageView = {
   location: string;
   eventTitle: string;
   when: ZonedClock;
+  /** True once the shift's end instant has been reached. The private link can no longer change this signup. */
+  ended: boolean;
 };
 
 /**
@@ -85,12 +87,13 @@ export function confirmedOperationShift(db: Database.Database, operationId: stri
   return row?.status === 'confirmed' ? found.shiftId : null;
 }
 
-export type CancelResult = { ok: true; already: boolean } | { ok: false; reason: 'invalid' };
+export type CancelResult = { ok: true; already: boolean } | { ok: false; reason: 'invalid' | 'ended' };
 
 /**
  * Marks this signup cancelled, frees its spot, and queues cancellation mail.
  * Cancelling the same link again is the same result and does not queue a second letter.
  * A pending confirmation is cancelled in this transaction. Mail already accepted cannot be recalled.
+ * Once the shift has ended, a confirmed signup stays confirmed and no mail is queued.
  */
 export function cancelSignup(db: Database.Database, token: string, now: string, mail: MailIdentity): CancelResult {
   if (!manageTokenShape(token)) return { ok: false, reason: 'invalid' };
@@ -100,13 +103,14 @@ export function cancelSignup(db: Database.Database, token: string, now: string, 
 
 export type PartySizeResult =
   | { ok: true; groupSize: number; changed: boolean }
-  | { ok: false; reason: 'invalid' | 'cancelled' | 'full'; spotsLeft?: number };
+  | { ok: false; reason: 'invalid' | 'cancelled' | 'full' | 'ended'; spotsLeft?: number };
 
 /**
  * Changes how many spots this one signup holds. The signup stays confirmed, under the same name.
  * A smaller count frees the difference. A larger count is saved only when the shift still has room
  * and the new count is within the stored maximum. Saving the current count does not write again.
  * A real change tells each active coordinator once for that new count.
+ * Once the shift has ended, the count stays as it is and no mail is queued.
  */
 export function changePartySize(
   db: Database.Database,
@@ -148,7 +152,8 @@ export function readManageSignup(db: Database.Database, token: string, now: stri
          e.title AS title,
          e.location AS location,
          e.tz AS tz,
-         s.starts_at_utc AS starts_at_utc
+         s.starts_at_utc AS starts_at_utc,
+         s.ends_at_utc AS ends_at_utc
        FROM signups su
        JOIN shifts s ON s.id = su.shift_id
        JOIN events e ON e.id = s.event_id
@@ -174,6 +179,7 @@ export function readManageSignup(db: Database.Database, token: string, now: stri
     location: row.location,
     eventTitle: row.title,
     when: formatInstantInZone(row.starts_at_utc, row.tz),
+    ended: row.ends_at_utc <= now,
   };
 }
 
@@ -355,6 +361,9 @@ function writePartySize(
   }
   if (row.status === 'cancelled') return { ok: false, reason: 'cancelled' };
   if (row.status !== 'confirmed') return { ok: false, reason: 'invalid' };
+  const endsAt = shiftEndsAt(db, row.shift_id);
+  if (endsAt === null) return { ok: false, reason: 'invalid' };
+  if (endsAt <= now) return { ok: false, reason: 'ended' };
   if (!Number.isInteger(groupSize) || groupSize < 1 || groupSize > MAX_PARTY_SIZE) return { ok: false, reason: 'invalid' };
 
   const current = Number(row.group_size);
@@ -388,6 +397,13 @@ function writePartySize(
     });
   }
   return { ok: true, groupSize, changed: true };
+}
+
+function shiftEndsAt(db: Database.Database, shiftId: number): string | null {
+  const shift = db.prepare('SELECT ends_at_utc AS ends_at_utc FROM shifts WHERE id = ?').get(shiftId) as
+    | { ends_at_utc: string }
+    | undefined;
+  return shift?.ends_at_utc ?? null;
 }
 
 function partyRoom(
@@ -433,6 +449,9 @@ function cancelConfirmed(db: Database.Database, hash: string, token: string, now
   }
   if (row.status === 'cancelled') return { ok: true, already: true };
   if (row.status !== 'confirmed' || !row.name || !row.email_norm) return { ok: false, reason: 'invalid' };
+  const endsAt = shiftEndsAt(db, row.shift_id);
+  if (endsAt === null) return { ok: false, reason: 'invalid' };
+  if (endsAt <= now) return { ok: false, reason: 'ended' };
   const updated = db
     .prepare(
       `UPDATE signups
@@ -558,4 +577,5 @@ type ManageRow = {
   location: string;
   tz: string;
   starts_at_utc: string;
+  ends_at_utc: string;
 };

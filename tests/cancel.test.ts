@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Temporal } from '@js-temporal/polyfill';
 import { afterEach, describe, expect, it } from 'vitest';
+import { switchSignup } from '../src/admin/store.js';
 import { createApp } from '../src/app.js';
 import { issueCancelToken, issuePartyToken } from '../src/cancel-token.js';
+import { cancelSignup, changePartySize } from '../src/signup.js';
 import { loadConfig } from '../src/config.js';
 import { openAppDatabase } from '../src/db.js';
 import { issueFormToken } from '../src/form-token.js';
@@ -457,6 +459,83 @@ describe('manage-link party size', () => {
       group_size: 3,
       status: 'cancelled',
     }]);
+  });
+
+  it('hides party size, cancel, and switch once the shift has ended', async () => {
+    const { app, db, shiftId } = await buildApp({ capacity: 6 });
+    const eventId = Number((db.prepare('SELECT id AS id FROM events').get() as { id: number }).id);
+    const destinationId = insertShift(db, eventId, 'Distribution', '2026-10-17T14:00:00.000Z', '2026-10-17T17:00:00.000Z', 4);
+    const saved = await postSignup(app, shiftId, { name: 'Pat Party', email: 'pat.late@example.invalid', partySize: '3' }, '203.0.113.150');
+    const managePath = await managePathFrom(app, saved);
+    const openHtml = await (await app.request(managePath)).text();
+    expect(openHtml).toContain('How many people?');
+    expect(openHtml).toContain('Cancel this signup');
+    expect(optionValues(openHtml)).toEqual([String(destinationId)]);
+    const signupId = Number((db.prepare('SELECT id AS id FROM signups').get() as { id: number }).id);
+    db.prepare(
+      `INSERT INTO coordinators (email, name, role, password_hash, active, created_at)
+       VALUES ('ada@example.invalid', 'Ada Admin', 'coordinator', NULL, 1, ?)`,
+    ).run(NOW);
+    // 13 hours after the shift ended, the private link is still valid.
+    db.prepare('UPDATE shifts SET starts_at_utc = ?, ends_at_utc = ? WHERE id = ?').run(
+      '2026-10-14T02:00:00.000Z',
+      '2026-10-14T05:00:00.000Z',
+      shiftId,
+    );
+    db.prepare("UPDATE signups SET updated_at = '2026-10-14T04:00:00.000Z' WHERE id = ?").run(signupId);
+
+    const ended = await app.request(managePath);
+    const html = await ended.text();
+    expect(ended.status).toBe(200);
+    expect(html).toContain('Confirmed');
+    expect(html).toContain('This shift has ended.');
+    expect(html).toContain('<dd>3</dd>');
+    expect(html).not.toContain('How many people?');
+    expect(html).not.toContain('Cancel this signup');
+    expect(html).not.toContain('name="party_size"');
+    expect(html).not.toContain('name="cancel_token"');
+    expect(html).not.toContain('name="destination"');
+    expect(html).not.toContain('The spot is open for someone else');
+    expect(html).not.toContain('spots are open for someone else');
+
+    const token = managePath.slice(3);
+    const party = await postParty(app, managePath, openHtml, '1', { ip: '203.0.113.151' });
+    expect(party.status).toBe(400);
+    expect(await party.text()).toContain('This shift has ended.');
+    const cancelled = await postCancel(app, managePath, field(openHtml, 'cancel_token'), { ip: '203.0.113.152' });
+    expect(cancelled.status).toBe(400);
+    expect(await cancelled.text()).toContain('This shift has ended.');
+    const switched = await postSwitch(app, managePath, openHtml, String(destinationId));
+    expect(switched.status).toBe(400);
+    expect(await switched.text()).toContain('This shift has ended.');
+
+    const mail = {
+      baseUrl: 'http://127.0.0.1:3000',
+      basePath: '',
+      from: 'Hope Food Pantry <volunteer@example.invalid>',
+      replyTo: 'volunteer@example.invalid',
+    };
+    expect(changePartySize(db, token, 1, NOW, mail)).toEqual({ ok: false, reason: 'ended' });
+    expect(changePartySize(db, token, 3, NOW, mail)).toEqual({ ok: false, reason: 'ended' });
+    expect(cancelSignup(db, token, NOW, mail)).toEqual({ ok: false, reason: 'ended' });
+    expect(switchSignup(db, signupId, destinationId, 'ended-switch-operation', NOW, mail)).toEqual({
+      ok: false,
+      error: 'This shift has ended.',
+      shiftId,
+    });
+
+    expect(db.prepare('SELECT name, group_size, status, shift_id, updated_at FROM signups').all()).toEqual([{
+      name: 'Pat Party',
+      group_size: 3,
+      status: 'confirmed',
+      shift_id: shiftId,
+      updated_at: '2026-10-14T04:00:00.000Z',
+    }]);
+    expect(db.prepare('SELECT kind, status FROM outbox ORDER BY id').all()).toEqual([
+      { kind: 'confirmation', status: 'pending' },
+    ]);
+    const letters = db.prepare('SELECT body_text FROM outbox').all() as { body_text: string }[];
+    expect(letters.map((letter) => letter.body_text).join('\n')).not.toContain('open for someone else');
   });
 });
 

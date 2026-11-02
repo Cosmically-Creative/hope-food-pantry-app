@@ -58,6 +58,7 @@ const PARTY_ORIGIN = 'The update could not be sent from this page.';
 const PARTY_REJECTED = 'The update could not be confirmed. Please try again.';
 const PARTY_UNAVAILABLE = 'The update could not be saved. Please try again in a little while.';
 const PARTY_NOTE = 'The number of people on this signup is saved. The signup stays.';
+const SHIFT_ENDED = 'This shift has ended.';
 const EXPIRED = 'This form expired. Please submit it again.';
 
 export type SignupServices = {
@@ -332,7 +333,7 @@ function showManage(
     'Your signup · Hope Volunteer',
     <ManagePage
       signup={signup}
-      cancel={cancelForm(services, token, signup.status)}
+      cancel={cancelForm(services, token, signup.status, signup.ended)}
       switches={switchForm(services, token, signup)}
       party={partyForm(services, token, signup, partyError)}
       reminders={reminderForm(services, token, signup)}
@@ -372,6 +373,7 @@ async function submitCancel(c: Context, services: SignupServices): Promise<Respo
   }
   try {
     const result = cancelSignup(services.db, token, services.now(), mailIdentity(services.db, services.config));
+    if (!result.ok && result.reason === 'ended') return showManage(c, services, token, 400, SHIFT_ENDED);
     if (!result.ok) return missingManage(c, services);
   } catch (err) {
     if (!isBusy(err)) throw err;
@@ -395,6 +397,7 @@ async function submitSwitch(c: Context, services: SignupServices): Promise<Respo
     return showManage(c, services, token, 400, SWITCH_REJECTED);
   }
   if (signup.status !== 'confirmed') return showManage(c, services, token, 400, 'This signup is cancelled.');
+  if (signup.ended) return showManage(c, services, token, 400, SHIFT_ENDED);
   const destination = Number(textField(body, 'destination'));
   if (!Number.isSafeInteger(destination) || destination <= 0) return showManage(c, services, token, 400, 'Choose a shift.');
   const formToken = readFormToken(services.config.sessionSecret, textField(body, 'form_token'), signup.shiftId, epochMs(services.now()), 0);
@@ -432,10 +435,10 @@ function switchedAlready(c: Context, services: SignupServices, token: string, bo
 function partyForm(
   services: SignupServices,
   token: string,
-  signup: { status: 'confirmed' | 'cancelled'; shiftId: number; groupSize: number },
+  signup: { status: 'confirmed' | 'cancelled'; ended: boolean; shiftId: number; groupSize: number },
   error?: string,
 ): PartyForm | null {
-  if (signup.status !== 'confirmed') return null;
+  if (signup.status !== 'confirmed' || signup.ended) return null;
   return {
     action: appPath(services.config, `/m/${token}/party`),
     token: issuePartyToken(services.config.sessionSecret, token),
@@ -457,6 +460,7 @@ async function submitParty(c: Context, services: SignupServices): Promise<Respon
     return showManage(c, services, token, 400, PARTY_REJECTED);
   }
   if (signup.status !== 'confirmed') return showManage(c, services, token, 400, 'This signup is cancelled.');
+  if (signup.ended) return showManage(c, services, token, 400, SHIFT_ENDED);
   const raw = textField(body, 'party_size');
   const parsed = raw.trim().length === 0
     ? { ok: false as const, error: 'Choose how many people are coming.' }
@@ -465,6 +469,7 @@ async function submitParty(c: Context, services: SignupServices): Promise<Respon
   try {
     const result = changePartySize(services.db, token, parsed.groupSize, services.now(), mailIdentity(services.db, services.config));
     if (!result.ok && result.reason === 'cancelled') return showManage(c, services, token, 400, 'This signup is cancelled.');
+    if (!result.ok && result.reason === 'ended') return showManage(c, services, token, 400, SHIFT_ENDED);
     if (!result.ok && result.reason === 'full') {
       const spotsLeft = result.spotsLeft ?? 0;
       return showManage(c, services, token, 409, undefined, spotsLeft > 0 ? spotsLeftMessage(spotsLeft) : FULL);
@@ -479,8 +484,8 @@ async function submitParty(c: Context, services: SignupServices): Promise<Respon
   return c.redirect(appPath(services.config, `/m/${token}?notice=party`), 303);
 }
 
-function switchForm(services: SignupServices, token: string, signup: { status: 'confirmed' | 'cancelled'; shiftId: number; eventId: number; name: string; email: string; groupSize: number }): SwitchForm | null {
-  if (signup.status !== 'confirmed') return null;
+function switchForm(services: SignupServices, token: string, signup: { status: 'confirmed' | 'cancelled'; ended: boolean; shiftId: number; eventId: number; name: string; email: string; groupSize: number }): SwitchForm | null {
+  if (signup.status !== 'confirmed' || signup.ended) return null;
   const targets = listMoveTargets(services.db, signup.eventId, signup.shiftId, services.now(), {
     publishedOnly: true,
     signupWindow: true,
@@ -539,8 +544,13 @@ async function submitReminders(c: Context, services: SignupServices): Promise<Re
   return c.redirect(appPath(services.config, `/m/${token}`), 303);
 }
 
-function cancelForm(services: SignupServices, token: string, status: 'confirmed' | 'cancelled'): { action: string; token: string } | null {
-  if (status !== 'confirmed') return null;
+function cancelForm(
+  services: SignupServices,
+  token: string,
+  status: 'confirmed' | 'cancelled',
+  ended: boolean,
+): { action: string; token: string } | null {
+  if (status !== 'confirmed' || ended) return null;
   return {
     action: appPath(services.config, `/m/${token}`),
     token: issueCancelToken(services.config.sessionSecret, token),

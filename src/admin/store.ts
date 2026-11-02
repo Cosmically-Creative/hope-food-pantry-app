@@ -1382,6 +1382,9 @@ function relocate(
   if (source.status !== 'confirmed') {
     return { ok: false, error: transferError(options.audience, 'cancelled'), shiftId: source.shift_id };
   }
+  if (options.audience === 'volunteer' && source.ends_at_utc <= now) {
+    return { ok: false, error: transferError(options.audience, 'ended'), shiftId: source.shift_id };
+  }
   if (!Number.isSafeInteger(destinationShiftId) || destinationShiftId <= 0) {
     return { ok: false, error: transferError(options.audience, 'choose'), shiftId: source.shift_id };
   }
@@ -1534,6 +1537,7 @@ function transferError(audience: TransferOptions['audience'], code: TransferErro
     missing: 'That shift is not available.',
     event: 'Choose a shift in this event.',
     closed: 'That shift is closed.',
+    ended: 'This shift has ended.',
     early: 'That shift is not open for sign-up yet.',
     duplicate: 'That person is already signed up for this shift.',
     full: 'That shift is full.',
@@ -1550,6 +1554,7 @@ function transferError(audience: TransferOptions['audience'], code: TransferErro
     missing: 'That shift is not available.',
     event: 'Choose a shift in this event.',
     closed: 'That shift is closed.',
+    ended: 'This shift has ended.',
     early: 'Sign-up for that shift opens three months before the date.',
     duplicate: 'You are already signed up for that shift.',
     full: 'That shift is full.',
@@ -1569,6 +1574,7 @@ type TransferError =
   | 'missing'
   | 'event'
   | 'closed'
+  | 'ended'
   | 'early'
   | 'duplicate'
   | 'full'
@@ -1583,7 +1589,7 @@ function loadMoveSource(db: Database.Database, signupId: number): MoveSource | n
       `SELECT su.id AS id, su.shift_id AS shift_id, s.event_id AS event_id, su.name AS name, su.email AS email,
               su.email_norm AS email_norm, su.phone AS phone, su.notes AS notes, su.is_minor AS is_minor,
               su.guardian_name AS guardian_name, su.guardian_email AS guardian_email, su.reminders_off AS reminders_off,
-              su.group_size AS group_size, su.status AS status
+              su.group_size AS group_size, su.status AS status, s.ends_at_utc AS ends_at_utc
        FROM signups su
        JOIN shifts s ON s.id = su.shift_id
        WHERE su.id = ? AND su.anonymized_at IS NULL`,
@@ -1976,4 +1982,5 @@ type MoveSource = {
   reminders_off: number;
   group_size: number;
   status: string;
+  ends_at_utc: string;
 };
