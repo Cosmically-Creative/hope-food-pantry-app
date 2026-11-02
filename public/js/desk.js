@@ -1,4 +1,16 @@
 (function () {
+  window.addEventListener(
+    'error',
+    function (event) {
+      var target = event.target;
+      if (!target || !target.src || String(target.src).indexOf('challenges.cloudflare.com/turnstile') === -1) return;
+      document.querySelectorAll('[data-turnstile-fallback]').forEach(function (node) {
+        node.hidden = false;
+      });
+    },
+    true,
+  );
+
   var key = 'hope-place';
   var place = null;
   try {

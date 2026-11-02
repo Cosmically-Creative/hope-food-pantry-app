@@ -526,6 +526,9 @@ describe('coordinator screens', () => {
     expect(optionValues(html, 'destination')).toEqual([String(destinationId)]);
     expect(html).toContain('<optgroup label="Friday, October 23, 2026">');
     expect(html).toContain('>Distribution, October 23, 2026, 9:00 AM to 12:00 PM CDT<');
+    expect(html).toContain('href="mailto:kim@example.invalid"');
+    expect(html).toContain('href="tel:+17125550199"');
+    expect(html).toContain('>Move to another shift</summary>');
     const moved = await postMove(app, cookie, signupId, html, String(destinationId));
     expect(moved.status).toBe(303);
     expect(moved.headers.get('location')).toBe(`/admin/shifts/${destinationId}?notice=moved`);

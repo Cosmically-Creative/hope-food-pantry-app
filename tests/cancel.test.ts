@@ -36,7 +36,11 @@ describe('manage-link cancellation', () => {
     };
     const viewed = await app.request(managePath);
     expect(viewed.status).toBe(200);
-    expect(await viewed.text()).toContain('Cancel this signup');
+    const viewedHtml = await viewed.text();
+    expect(viewedHtml).toContain('Cancel this signup');
+    expect(viewedHtml).toContain('>Cancel<');
+    expect(viewedHtml).toContain('>9:00 AM</time> to <time dateTime="12:00">12:00 PM</time>');
+    expect(viewedHtml).not.toContain('queues a change email');
     expect(db.prepare('SELECT status, updated_at FROM signups').get()).toEqual({
       status: 'confirmed',
       updated_at: before.updated_at,

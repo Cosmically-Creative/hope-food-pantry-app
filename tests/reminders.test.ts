@@ -273,6 +273,8 @@ describe('reminder mail', () => {
     const confirmHtml = await confirm.text();
     expect(confirmHtml).toContain('Are you sure you want to cancel?');
     expect(confirmHtml).toContain('Cancel this signup to open the spot for someone else.');
+    expect(confirmHtml).toContain('We&#39;ll email you when it&#39;s cancelled.');
+    expect(confirmHtml).toContain('>9:00 AM</time> to <time dateTime="12:00">12:00 PM</time>');
     expect(confirmHtml).toContain('Pat Review');
     expect(confirmHtml).toContain('Sorting');
     expect(db.prepare(`SELECT status FROM signups`).get()).toEqual({ status: 'confirmed' });

@@ -862,13 +862,19 @@ main a:hover {
   margin: 0.5rem 0 0;
 }
 
+.manage-record:has(.manage-tools) {
+  padding-top: 4.35rem;
+}
+
 .manage-tools {
   position: absolute;
   z-index: 2;
   top: 1.05rem;
   right: 1.05rem;
+  left: 1.05rem;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.4rem;
   margin: 0;
 }
@@ -878,44 +884,9 @@ main a:hover {
 }
 
 .manage-x {
-  width: 2.5rem;
-  height: 2.5rem;
   min-height: 2.5rem;
-  padding: 0;
-  border-color: var(--hope-border);
-  background: #fff;
+  padding: 0.4rem 0.95rem;
   box-shadow: none;
-}
-
-.manage-x::before {
-  background: var(--hope-yellow);
-}
-
-.manage-x span {
-  position: relative;
-  width: 0.7rem;
-  height: 0.7rem;
-  font-size: 0;
-}
-
-.manage-x span::before,
-.manage-x span::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 0.7rem;
-  height: 2px;
-  border-radius: 1px;
-  background: currentColor;
-}
-
-.manage-x span::before {
-  transform: translate(-50%, -50%) rotate(45deg);
-}
-
-.manage-x span::after {
-  transform: translate(-50%, -50%) rotate(-45deg);
 }
 
 .manage-menu {
@@ -3057,6 +3028,45 @@ button.btn-quiet::before {
   color: var(--hope-ink);
 }
 
+.shift-card a[href^="tel:"],
+.shift-card a[href^="mailto:"] {
+  color: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
+
+.roster-move {
+  margin-top: 0.75rem;
+}
+
+.roster-move:not([open]) > .move-form,
+.roster-move:not([open])::details-content {
+  display: none;
+}
+
+.roster-move > summary {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 2rem;
+  list-style: none;
+  cursor: pointer;
+  color: #4d7494;
+  font-size: 0.92rem;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
+
+.roster-move > summary::-webkit-details-marker {
+  display: none;
+}
+
+.roster-move > .move-form {
+  margin-top: 0.75rem;
+}
+
 .event-page .desk-intro .desk-toolbar {
   align-items: center;
 }
@@ -4339,10 +4349,6 @@ button.btn-quiet::before {
 
   .manage-follow .manage-action-row button {
     width: 100%;
-  }
-
-  .manage-record:has(.manage-tools) {
-    padding-top: 4.35rem;
   }
 
   .manage-record:has(.manage-tools) .details {
@@ -5829,5 +5835,64 @@ main > .crumb,
 
   .shift-line-link {
     flex-wrap: wrap;
+  }
+}
+
+@media print {
+  .skip-link,
+  .header,
+  .footer,
+  .session-bar,
+  .crumb,
+  .desk-actions,
+  .desk-inline,
+  .pick,
+  .pick-bar,
+  .notice,
+  .event-edit,
+  .walkin-menu,
+  .roster-move,
+  .roster-actions,
+  .signup-form,
+  .confirm-dialog,
+  .event-dialog,
+  button,
+  .btn {
+    display: none !important;
+  }
+
+  body,
+  main,
+  .event-page,
+  .shift-card,
+  article.shift-card,
+  .desk-events,
+  .event-strip,
+  .manage,
+  .manage-record {
+    background: #fff;
+    box-shadow: none;
+    color: #000;
+  }
+
+  .shift-list {
+    display: block;
+  }
+
+  .shift-list > li,
+  li.shift-card {
+    break-inside: avoid;
+    margin-bottom: 0.75rem;
+    border: 1px solid #bbb;
+    border-radius: 0;
+    box-shadow: none;
+    background: #fff;
+  }
+
+  a,
+  .shift-card a[href^="tel:"],
+  .shift-card a[href^="mailto:"] {
+    color: #000;
+    text-decoration: none;
   }
 }

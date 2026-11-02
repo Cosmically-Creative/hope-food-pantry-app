@@ -47,6 +47,7 @@ export type ManageView = {
   location: string;
   eventTitle: string;
   when: ZonedClock;
+  ends: ZonedClock;
   /** True once the shift's end instant has been reached. The private link can no longer change this signup. */
   ended: boolean;
 };
@@ -278,6 +279,7 @@ export function readManageSignup(db: Database.Database, token: string, now: stri
     location: row.location,
     eventTitle: row.title,
     when: formatInstantInZone(row.starts_at_utc, row.tz),
+    ends: formatInstantInZone(row.ends_at_utc, row.tz),
     ended: row.ends_at_utc <= now,
   };
 }

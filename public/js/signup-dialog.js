@@ -200,14 +200,28 @@
     if (!widget || !sitekey) return;
     loadTurnstile()
       .then(function () {
-        if (!widget.isConnected || !window.turnstile) return;
+        if (!widget.isConnected || !window.turnstile) {
+          showTurnstileFallback(scope);
+          return;
+        }
         // turnstile.ready() throws when this script is inserted dynamically.
-        widgetId = window.turnstile.render(widget, {
-          sitekey: sitekey,
-          action: widget.getAttribute('data-action') || 'signup',
-        });
+        try {
+          widgetId = window.turnstile.render(widget, {
+            sitekey: sitekey,
+            action: widget.getAttribute('data-action') || 'signup',
+          });
+        } catch (err) {
+          showTurnstileFallback(scope);
+        }
       })
-      .catch(function () {});
+      .catch(function () {
+        showTurnstileFallback(scope);
+      });
+  }
+
+  function showTurnstileFallback(scope) {
+    var fallback = scope.querySelector('[data-turnstile-fallback]');
+    if (fallback) fallback.hidden = false;
   }
 
   function loadTurnstile() {

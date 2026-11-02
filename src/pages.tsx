@@ -13,6 +13,9 @@ import { assetHref } from './static-assets.js';
 import { appPath } from './url.js';
 
 const PANTRY_SITE = 'https://hopefoodpantrysc.org';
+const PANTRY_PHONE_LABEL = '712\u2011540\u20119351';
+const PANTRY_PHONE_HREF = 'tel:+17125409351';
+const PANTRY_EMAIL = 'hopepantry@gmail.com';
 
 function asset(config: AppConfig, file: string): string {
   return assetHref(config, file);
@@ -136,10 +139,10 @@ export function Layout(props: {
             <div class="footer-cell">
               <h3>Contact Us</h3>
               <p>
-                <a href="tel:+17125409351">712‑540‑9351</a>
+                <a href={PANTRY_PHONE_HREF}>{PANTRY_PHONE_LABEL}</a>
               </p>
               <p>
-                <a href="mailto:hopepantry@gmail.com">hopepantry@gmail.com</a>
+                <a href={`mailto:${PANTRY_EMAIL}`}>{PANTRY_EMAIL}</a>
               </p>
               <div class="social-links">
                 <a href="https://www.facebook.com/schopefoodpantry" target="_blank" rel="noopener noreferrer">
@@ -505,7 +508,7 @@ export function ManagePage(props: {
               <form id="manage-cancel-form" class="manage-cancel" method="post" action={props.cancel.action}>
                 <input type="hidden" name="cancel_token" value={props.cancel.token} />
                 <button type="submit" class="manage-x" aria-label="Cancel this signup" aria-haspopup="dialog" data-manage-cancel="">
-                  <span aria-hidden="true">×</span>
+                  Cancel
                 </button>
               </form>
             ) : null}
@@ -567,8 +570,8 @@ export function ManagePage(props: {
                   </div>
                   <p class="hint">
                     {signup.groupSize > 1
-                      ? `Opens these ${signup.groupSize} spots, queues a change email, and replaces this link.`
-                      : 'Opens your spot here, queues a change email, and replaces this link.'}
+                      ? `This opens these ${signup.groupSize} spots. We'll email a new link, and this one will stop working.`
+                      : "This opens your spot here. We'll email a new link, and this one will stop working."}
                   </p>
                 </form>
               )
@@ -585,11 +588,7 @@ export function ManagePage(props: {
               </button>
             </form>
             <h2 id="manage-cancel-title">Are you sure you want to cancel?</h2>
-            <p>
-              {signup.groupSize > 1
-                ? `Cancel this signup to open these ${signup.groupSize} spots for someone else. A cancellation email is queued when you cancel.`
-                : 'Cancel this signup to open the spot for someone else. A cancellation email is queued when you cancel.'}
-            </p>
+            <p>{cancelEffect(signup.groupSize)}</p>
             <div class="confirm-actions">
               <button type="submit" form="manage-cancel-form">
                 Cancel this signup
@@ -601,11 +600,7 @@ export function ManagePage(props: {
           </div>
         </dialog>
       ) : cancelled ? (
-        <p>
-          {signup.groupSize > 1
-            ? `This signup is cancelled. The ${signup.groupSize} spots it held are open for someone else. A cancellation email is queued.`
-            : 'This signup is cancelled. The spot is open for someone else. A cancellation email is queued.'}
-        </p>
+        <p>{cancelledSignupCopy(signup.groupSize)}</p>
       ) : null}
     </article>
   );
@@ -717,6 +712,7 @@ type SignupIdentity = {
   location: string;
   eventTitle: string;
   when: ZonedClock;
+  ends: ZonedClock;
   ended: boolean;
 };
 
@@ -730,7 +726,11 @@ function SignupIntro(props: { signup: SignupIdentity }) {
       <p>{signup.eventTitle}</p>
       <h2>{signup.role}</h2>
       <p class="when">
-        <time dateTime={signup.when.date}>{signup.when.dateLabel}</time> {signup.when.timeLabel} {signup.when.abbreviation}
+        <time dateTime={signup.when.date}>{signup.when.dateLabel}</time>{' '}
+        <time dateTime={signup.when.time24}>{signup.when.timeLabel}</time>
+        {' to '}
+        {signup.when.date === signup.ends.date ? null : <time dateTime={signup.ends.date}>{signup.ends.dateLabel} </time>}
+        <time dateTime={signup.ends.time24}>{signup.ends.timeLabel}</time> {signup.when.abbreviation}
       </p>
       {signup.location ? <p class="location">{signup.location}</p> : null}
       {!cancelled && signup.ended ? <p>This shift has ended.</p> : null}
@@ -792,14 +792,25 @@ function openSpots(groupSize: number): string {
 
 function cancelEffect(groupSize: number): string {
   return groupSize > 1
-    ? `Cancel this signup to open these ${groupSize} spots for someone else. A cancellation email is queued when you cancel.`
-    : 'Cancel this signup to open the spot for someone else. A cancellation email is queued when you cancel.';
+    ? `Cancel this signup to open these ${groupSize} spots for someone else. We'll email you when it's cancelled.`
+    : "Cancel this signup to open the spot for someone else. We'll email you when it's cancelled.";
 }
 
 function cancelledSignupCopy(groupSize: number): string {
   return groupSize > 1
-    ? `This signup is cancelled. The ${groupSize} spots it held are open for someone else. A cancellation email is queued.`
-    : 'This signup is cancelled. The spot is open for someone else. A cancellation email is queued.';
+    ? `This signup is cancelled. The ${groupSize} spots it held are open for someone else. A cancellation email is on the way.`
+    : 'This signup is cancelled. The spot is open for someone else. A cancellation email is on the way.';
+}
+
+function PantryHelp(props: { lead: string }) {
+  return (
+    <>
+      {props.lead} <a href={PANTRY_PHONE_HREF}>{PANTRY_PHONE_LABEL}</a>
+      {' or email '}
+      <a href={`mailto:${PANTRY_EMAIL}`}>{PANTRY_EMAIL}</a>
+      {' if you need help signing up.'}
+    </>
+  );
 }
 
 export function NotFoundPage() {
@@ -1246,7 +1257,9 @@ function SignupForm(props: { config: AppConfig; shiftId: number; eventId: number
         <p class="signup-note">Your full name is listed on the public sign-up page. Email, phone, and notes stay off that page.</p>
       </div>
       <noscript>
-        <p class="error">Signing up needs JavaScript for the abuse check. The pantry has not published a contact method for help with signup.</p>
+        <p class="error">
+          <PantryHelp lead="Signing up needs JavaScript. Call the pantry at" />
+        </p>
       </noscript>
       {errorEntries.length > 0 ? (
         <div class="error" role="alert">
@@ -1301,7 +1314,16 @@ function SignupForm(props: { config: AppConfig; shiftId: number; eventId: number
             : undefined
         }
       />
-      <Field id="signup-email" label="Email" name="email" type="email" value={form.values.email} error={errors.email} autoComplete="email" />
+      <Field
+        id="signup-email"
+        label="Email"
+        name="email"
+        type="email"
+        value={form.values.email}
+        error={errors.email}
+        autoComplete="email"
+        required
+      />
       <Field
         id="signup-phone"
         label="Phone"
@@ -1327,7 +1349,9 @@ function SignupForm(props: { config: AppConfig; shiftId: number; eventId: number
         <MoreDates dates={moreDates} eventId={props.eventId} selected={selected} count={extraCount} error={errors.dates} />
       ) : null}
       <div class="cf-turnstile" data-sitekey={form.siteKey} data-action="signup" />
-      <p class="signup-note" id="signup-turnstile-hint">This check confirms the signup came from a browser.</p>
+      <p class="error" data-turnstile-fallback hidden={true}>
+        <PantryHelp lead="The signup check could not load. Call the pantry at" />
+      </p>
       <button type="submit">{extraCount > 0 ? `Sign up for ${extraCount + 1} dates` : 'Sign up'}</button>
     </form>
   );

@@ -168,6 +168,17 @@ describe('public pages', () => {
     expect(shiftHtml).toContain('name="last_name"');
     expect(shiftHtml).toContain('First name');
     expect(shiftHtml).toContain('Last name');
+    expect(shiftHtml).toContain('9:00 AM to 12:00 PM');
+    expect(shiftHtml).toMatch(/id="signup-email"[^>]*required/);
+    expect(shiftHtml).toContain('Signing up needs JavaScript. Call the pantry at');
+    expect(shiftHtml).toContain('712\u2011540\u20119351');
+    expect(shiftHtml).toContain('href="tel:+17125409351"');
+    expect(shiftHtml).toContain('href="mailto:hopepantry@gmail.com"');
+    expect(shiftHtml).toContain('data-turnstile-fallback');
+    expect(shiftHtml).toContain('The signup check could not load.');
+    expect(shiftHtml).not.toContain('has not published a contact method');
+    expect(shiftHtml).not.toContain('abuse check');
+    expect(shiftHtml).not.toContain('This check confirms the signup came from a browser');
     expect(shiftHtml).toContain('class="signup-note">Your full name is listed on the public sign-up page. Email, phone, and notes stay off that page.');
     expect(shiftHtml).not.toContain('name="robots"');
     expect(shift.headers.get('x-robots-tag')).toBeNull();
@@ -176,6 +187,8 @@ describe('public pages', () => {
     expect(shiftHtml).not.toContain('data-guardian');
     expect(shiftHtml).not.toContain('I am under 18');
     const css = await (await app.request('/css/app.css')).text();
+    expect(css).toContain('@media print');
+    expect(css).toContain('.roster-move');
     expect(css).toContain('grid-template-columns: repeat(4, minmax(0, 1fr))');
     expect(css).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
     expect(css).not.toContain('minmax(16rem, 1fr)');

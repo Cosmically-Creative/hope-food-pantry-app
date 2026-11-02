@@ -141,6 +141,7 @@ export type ReminderPageSignup = {
   eventTitle: string;
   location: string;
   when: ZonedClock;
+  ends: ZonedClock;
   groupSize: number;
   status: 'confirmed' | 'cancelled';
   ended: boolean;
@@ -188,6 +189,7 @@ export function readReminderSignup(db: Database.Database, signupId: number, now:
     eventTitle: row.title,
     location: row.location.trim(),
     when: formatInstantInZone(row.starts_at_utc, row.tz),
+    ends: formatInstantInZone(row.ends_at_utc, row.tz),
     groupSize: Number(row.group_size),
     status: row.status,
     ended: row.ends_at_utc <= now,

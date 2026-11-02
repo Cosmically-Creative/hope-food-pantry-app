@@ -2007,12 +2007,18 @@ function Roster(props: { config: AppConfig; csrf: string; people: RosterPerson[]
             <strong>{person.name}</strong>
           </p>
           {person.groupSize > 1 ? <p>Holds {person.groupSize} spots</p> : null}
-          <p>{person.email}</p>
-          {person.phone ? <p>{person.phone}</p> : null}
+          <p>
+            <a href={`mailto:${person.email}`}>{person.email}</a>
+          </p>
+          {person.phone ? (
+            <p>
+              <PhoneLink phone={person.phone} />
+            </p>
+          ) : null}
           {person.notes ? <p>Note: {person.notes}</p> : null}
           <p>{person.status === 'confirmed' ? 'Confirmed' : 'Cancelled'}</p>
           {person.status === 'cancelled' ? (
-            <p>
+            <p class="roster-actions">
               <ConfirmAnchor
                 href={appPath(props.config, `/admin/signups/${person.id}/remove`)}
                 prompt={signupRemovalPrompt({ name: person.name, status: person.status })}
@@ -2023,7 +2029,7 @@ function Roster(props: { config: AppConfig; csrf: string; people: RosterPerson[]
           ) : null}
           {person.status === 'confirmed' ? (
             <>
-              <p>
+              <p class="roster-actions">
                 <ConfirmAnchor
                   class="text-action"
                   href={appPath(props.config, `/admin/signups/${person.id}/cancel`)}
@@ -2033,17 +2039,20 @@ function Roster(props: { config: AppConfig; csrf: string; people: RosterPerson[]
                 </ConfirmAnchor>
               </p>
               {props.moves && props.moves.targets.length > 0 && props.moves.tokens[person.id] ? (
-                <form method="post" action={appPath(props.config, `/admin/signups/${person.id}/move`)} class="move-form">
-                  <input type="hidden" name="csrf" value={props.csrf} />
-                  <input type="hidden" name="move_token" value={props.moves.tokens[person.id]} />
-                  <label for={`move-${person.id}`}>
-                    Move to
-                    <select id={`move-${person.id}`} name="destination" required>
-                      <ShiftTargetOptions targets={props.moves.targets} />
-                    </select>
-                  </label>
-                  <button type="submit">Move</button>
-                </form>
+                <details class="roster-move">
+                  <summary>Move to another shift</summary>
+                  <form method="post" action={appPath(props.config, `/admin/signups/${person.id}/move`)} class="move-form">
+                    <input type="hidden" name="csrf" value={props.csrf} />
+                    <input type="hidden" name="move_token" value={props.moves.tokens[person.id]} />
+                    <label for={`move-${person.id}`}>
+                      Move to
+                      <select id={`move-${person.id}`} name="destination" required>
+                        <ShiftTargetOptions targets={props.moves.targets} />
+                      </select>
+                    </label>
+                    <button type="submit">Move</button>
+                  </form>
+                </details>
               ) : null}
             </>
           ) : null}
@@ -2051,6 +2060,21 @@ function Roster(props: { config: AppConfig; csrf: string; people: RosterPerson[]
       ))}
     </ul>
   );
+}
+
+function PhoneLink(props: { phone: string }) {
+  const href = phoneHref(props.phone);
+  if (!href) return <>{props.phone}</>;
+  return <a href={href}>{props.phone}</a>;
+}
+
+/** A 10-digit pantry number dials as +1. Anything else keeps the digits it has. */
+function phoneHref(phone: string): string | null {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 10) return `tel:+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `tel:+${digits}`;
+  if (digits.length > 0) return `tel:${digits}`;
+  return null;
 }
 
 function LoginForm(props: { config: AppConfig; error?: string }) {
