@@ -101,6 +101,23 @@ export function cancelSignup(db: Database.Database, token: string, now: string, 
   return db.transaction(() => cancelConfirmed(db, hash, token, now, mail)).immediate();
 }
 
+/**
+ * Cancels one signup from the reminder link. The private manage token is only stored as a hash, so this does not need it.
+ * The manage link keeps working. The cancellation letter links to pageUrl, which is the reminder page.
+ * Cancelling again does not queue a second letter.
+ * Once the shift has ended, a confirmed signup stays confirmed and no mail is queued.
+ */
+export function cancelSignupById(
+  db: Database.Database,
+  signupId: number,
+  now: string,
+  mail: MailIdentity,
+  pageUrl: string,
+): CancelResult {
+  if (!Number.isSafeInteger(signupId) || signupId <= 0 || pageUrl.trim() === '') return { ok: false, reason: 'invalid' };
+  return db.transaction(() => cancelConfirmedById(db, signupId, now, mail, pageUrl)).immediate();
+}
+
 export type PartySizeResult =
   | { ok: true; groupSize: number; changed: boolean }
   | { ok: false; reason: 'invalid' | 'cancelled' | 'full' | 'ended'; spotsLeft?: number };
@@ -399,6 +416,92 @@ function writePartySize(
   return { ok: true, groupSize, changed: true };
 }
 
+type CancelMailRow = {
+  id: number;
+  status: string;
+  anonymized_at: string | null;
+  name: string | null;
+  email_norm: string | null;
+  shift_id: number;
+  group_size: number;
+};
+
+function cancelConfirmedById(
+  db: Database.Database,
+  signupId: number,
+  now: string,
+  mail: MailIdentity,
+  pageUrl: string,
+): CancelResult {
+  const row = db
+    .prepare(
+      `SELECT su.id AS id, su.status AS status, su.anonymized_at AS anonymized_at,
+              su.name AS name, su.email_norm AS email_norm, su.shift_id AS shift_id, su.group_size AS group_size
+       FROM signups su
+       WHERE su.id = ?`,
+    )
+    .get(signupId) as CancelMailRow | undefined;
+  if (!row || row.anonymized_at) return { ok: false, reason: 'invalid' };
+  if (row.status === 'cancelled') return { ok: true, already: true };
+  if (row.status !== 'confirmed' || !row.name || !row.email_norm) return { ok: false, reason: 'invalid' };
+  const endsAt = shiftEndsAt(db, row.shift_id);
+  if (endsAt === null) return { ok: false, reason: 'invalid' };
+  if (endsAt <= now) return { ok: false, reason: 'ended' };
+  const updated = db
+    .prepare(
+      `UPDATE signups
+       SET status = 'cancelled', updated_at = ?
+       WHERE id = ? AND status = 'confirmed' AND anonymized_at IS NULL`,
+    )
+    .run(now, signupId);
+  if (updated.changes === 1) {
+    queueVolunteerCancellation(db, row, now, mail, { token: '', pageUrl });
+    return { ok: true, already: false };
+  }
+  const again = db.prepare('SELECT status AS status FROM signups WHERE id = ?').get(signupId) as { status: string } | undefined;
+  if (again?.status === 'cancelled') return { ok: true, already: true };
+  return { ok: false, reason: 'invalid' };
+}
+
+function queueVolunteerCancellation(
+  db: Database.Database,
+  row: CancelMailRow,
+  now: string,
+  mail: MailIdentity,
+  link: { token: string; pageUrl?: string },
+): void {
+  if (!row.name || !row.email_norm) return;
+  cancelPendingConfirmations(db, row.id);
+  cancelPendingReminders(db, row.id, 'The signup was cancelled before this reminder was sent.');
+  const shift = loadShiftFacts(db, row.shift_id);
+  if (!shift) return;
+  queueCancellation(db, {
+    signupId: row.id,
+    shiftId: row.shift_id,
+    shiftVersion: shift.version,
+    token: link.token,
+    pageUrl: link.pageUrl,
+    volunteerName: row.name,
+    volunteerEmail: row.email_norm,
+    groupSize: Number(row.group_size),
+    shift: shift.facts,
+    mail,
+    now,
+  });
+  queueCoordinatorNotices(db, {
+    action: 'cancel',
+    signupId: row.id,
+    shiftId: row.shift_id,
+    shiftVersion: shift.version,
+    volunteerName: row.name,
+    volunteerEmail: row.email_norm,
+    groupSize: Number(row.group_size),
+    shift: shift.facts,
+    mail,
+    now,
+  });
+}
+
 function shiftEndsAt(db: Database.Database, shiftId: number): string | null {
   const shift = db.prepare('SELECT ends_at_utc AS ends_at_utc FROM shifts WHERE id = ?').get(shiftId) as
     | { ends_at_utc: string }
@@ -460,35 +563,7 @@ function cancelConfirmed(db: Database.Database, hash: string, token: string, now
     )
     .run(now, hash, now);
   if (updated.changes === 1) {
-    cancelPendingConfirmations(db, row.id);
-    cancelPendingReminders(db, row.id, 'The signup was cancelled before this reminder was sent.');
-    const shift = loadShiftFacts(db, row.shift_id);
-    if (shift) {
-      queueCancellation(db, {
-        signupId: row.id,
-        shiftId: row.shift_id,
-        shiftVersion: shift.version,
-        token,
-        volunteerName: row.name,
-        volunteerEmail: row.email_norm,
-        groupSize: Number(row.group_size),
-        shift: shift.facts,
-        mail,
-        now,
-      });
-      queueCoordinatorNotices(db, {
-        action: 'cancel',
-        signupId: row.id,
-        shiftId: row.shift_id,
-        shiftVersion: shift.version,
-        volunteerName: row.name,
-        volunteerEmail: row.email_norm,
-        groupSize: Number(row.group_size),
-        shift: shift.facts,
-        mail,
-        now,
-      });
-    }
+    queueVolunteerCancellation(db, row, now, mail, { token });
     return { ok: true, already: false };
   }
   const again = db

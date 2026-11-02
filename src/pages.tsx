@@ -6,7 +6,9 @@ import { SIGNUP_TOO_EARLY, signupDeadlineLabel } from './signup-window.js';
 import { partyChoiceLabel, partyChoices, type SignupErrors, type SignupValues } from './signup-form.js';
 import type { MoveTarget } from './admin/store.js';
 import { ShiftTargetOptions } from './shift-options.js';
+import type { ReminderPageSignup } from './reminders.js';
 import type { ManageView } from './signup.js';
+import type { ZonedClock } from './time.js';
 import { assetHref } from './static-assets.js';
 import { appPath } from './url.js';
 
@@ -414,17 +416,7 @@ export function ManagePage(props: {
   const cancelled = signup.status !== 'confirmed';
   return (
     <article class="manage">
-      <header class="manage-intro">
-        <h1>Your signup</h1>
-        <p class={cancelled ? 'status is-cancelled' : 'status is-confirmed'}>{cancelled ? 'Cancelled' : 'Confirmed'}</p>
-        <p>{signup.eventTitle}</p>
-        <h2>{signup.role}</h2>
-        <p class="when">
-          <time dateTime={signup.when.date}>{signup.when.dateLabel}</time> {signup.when.timeLabel} {signup.when.abbreviation}
-        </p>
-        {signup.location ? <p class="location">{signup.location}</p> : null}
-        {!cancelled && signup.ended ? <p>This shift has ended.</p> : null}
-      </header>
+      <SignupIntro signup={signup} />
       {props.note ? <p class="status">{props.note}</p> : null}
       {props.notice ? (
         <p class="error" role="alert">
@@ -445,32 +437,7 @@ export function ManagePage(props: {
             ) : null}
           </div>
         ) : null}
-        <dl class="details">
-          <div>
-            <dt>Name</dt>
-            <dd>{signup.name}</dd>
-          </div>
-          <div>
-            <dt>People</dt>
-            <dd>{signup.groupSize}</dd>
-          </div>
-          <div>
-            <dt>Email</dt>
-            <dd>{signup.email}</dd>
-          </div>
-          {signup.phone ? (
-            <div>
-              <dt>Phone</dt>
-              <dd>{signup.phone}</dd>
-            </div>
-          ) : null}
-          {signup.notes ? (
-            <div class="is-wide">
-              <dt>Notes</dt>
-              <dd class="description">{signup.notes}</dd>
-            </div>
-          ) : null}
-        </dl>
+        <SignupFacts signup={signup} />
         {party || props.switches ? (
           <div class="manage-follow">
             {party ? (
@@ -595,26 +562,170 @@ export function SwitchAlreadyPage() {
   );
 }
 
-export function ReminderOffPage(props: { config: AppConfig; token: string; replyTo: string; off: boolean; error?: string }) {
+export function ReminderOffPage(props: { config: AppConfig; token: string; signup: ReminderPageSignup; error?: string }) {
+  const signup = props.signup;
+  const cancelled = signup.status !== 'confirmed';
+  const canCancel = !cancelled && !signup.ended;
   return (
-    <>
-      <h1>Reminder emails</h1>
+    <article class="manage">
+      <SignupIntro signup={signup} />
       {props.error ? (
         <p class="error" role="alert">
           {props.error}
         </p>
       ) : null}
-      {props.off ? (
-        <p>Reminder emails for this signup are off. The signup stays. Confirmation, change, and cancellation emails still arrive.</p>
-      ) : (
-        <form method="post" action={appPath(props.config, `/u/${props.token}`)} class="cancel-form">
-          <p>This turns off reminder emails for this signup. It does not cancel the signup. Confirmation, change, and cancellation emails still arrive.</p>
-          <p>The pantry reads mail sent to {props.replyTo}. This button turns reminders off immediately.</p>
-          <button type="submit">Stop reminder emails</button>
-        </form>
-      )}
-    </>
+      <section class="manage-record">
+        <SignupFacts signup={signup} />
+        {cancelled ? null : (
+          <div class="manage-follow">
+            <div class="reminder-job">
+              {canCancel ? (
+                <div class="reminder-cancel">
+                  <p>{openSpots(signup.groupSize)}</p>
+                  <a class="btn" href={appPath(props.config, `/u/${props.token}/cancel`)}>
+                    Cancel this signup
+                  </a>
+                </div>
+              ) : null}
+              <ReminderPreference config={props.config} token={props.token} off={signup.remindersOff} />
+            </div>
+          </div>
+        )}
+      </section>
+      {cancelled ? <p>{cancelledSignupCopy(signup.groupSize)}</p> : null}
+    </article>
   );
+}
+
+export function ReminderCancelPage(props: {
+  config: AppConfig;
+  token: string;
+  signup: ReminderPageSignup;
+  cancelToken: string;
+  error?: string;
+}) {
+  return (
+    <article class="manage">
+      <SignupIntro signup={props.signup} />
+      {props.error ? (
+        <p class="error" role="alert">
+          {props.error}
+        </p>
+      ) : null}
+      <section class="manage-record">
+        <SignupFacts signup={props.signup} />
+        <div class="manage-follow">
+          <form method="post" action={appPath(props.config, `/u/${props.token}/cancel`)} class="reminder-job">
+            <input type="hidden" name="cancel_token" value={props.cancelToken} />
+            <h2>Are you sure you want to cancel?</h2>
+            <p>{cancelEffect(props.signup.groupSize)}</p>
+            <div class="confirm-actions">
+              <button type="submit">Cancel this signup</button>
+              <a class="btn btn-quiet" href={appPath(props.config, `/u/${props.token}`)}>
+                Go back
+              </a>
+            </div>
+          </form>
+        </div>
+      </section>
+    </article>
+  );
+}
+
+type SignupIdentity = {
+  name: string;
+  email: string;
+  phone: string | null;
+  notes: string | null;
+  groupSize: number;
+  status: 'confirmed' | 'cancelled';
+  role: string;
+  location: string;
+  eventTitle: string;
+  when: ZonedClock;
+  ended: boolean;
+};
+
+function SignupIntro(props: { signup: SignupIdentity }) {
+  const signup = props.signup;
+  const cancelled = signup.status !== 'confirmed';
+  return (
+    <header class="manage-intro">
+      <h1>Your signup</h1>
+      <p class={cancelled ? 'status is-cancelled' : 'status is-confirmed'}>{cancelled ? 'Cancelled' : 'Confirmed'}</p>
+      <p>{signup.eventTitle}</p>
+      <h2>{signup.role}</h2>
+      <p class="when">
+        <time dateTime={signup.when.date}>{signup.when.dateLabel}</time> {signup.when.timeLabel} {signup.when.abbreviation}
+      </p>
+      {signup.location ? <p class="location">{signup.location}</p> : null}
+      {!cancelled && signup.ended ? <p>This shift has ended.</p> : null}
+    </header>
+  );
+}
+
+function SignupFacts(props: { signup: SignupIdentity }) {
+  const signup = props.signup;
+  return (
+    <dl class="details">
+      <div>
+        <dt>Name</dt>
+        <dd>{signup.name}</dd>
+      </div>
+      <div>
+        <dt>People</dt>
+        <dd>{signup.groupSize}</dd>
+      </div>
+      <div>
+        <dt>Email</dt>
+        <dd>{signup.email}</dd>
+      </div>
+      {signup.phone ? (
+        <div>
+          <dt>Phone</dt>
+          <dd>{signup.phone}</dd>
+        </div>
+      ) : null}
+      {signup.notes ? (
+        <div class="is-wide">
+          <dt>Notes</dt>
+          <dd class="description">{signup.notes}</dd>
+        </div>
+      ) : null}
+    </dl>
+  );
+}
+
+function ReminderPreference(props: { config: AppConfig; token: string; off: boolean }) {
+  if (props.off) {
+    return (
+      <p class="signup-reminders">Reminder emails are off. This signup stays.</p>
+    );
+  }
+  return (
+    <form method="post" action={appPath(props.config, `/u/${props.token}`)} class="signup-reminders">
+      <p>Reminder emails are on. Stopping them does not cancel this signup.</p>
+      <button class="btn-quiet" type="submit">
+        Stop reminder emails
+      </button>
+    </form>
+  );
+}
+
+function openSpots(groupSize: number): string {
+  return groupSize > 1 ? `Opens these ${groupSize} spots for someone else.` : 'Opens the spot for someone else.';
+}
+
+function cancelEffect(groupSize: number): string {
+  return groupSize > 1
+    ? `Cancel this signup to open these ${groupSize} spots for someone else. A cancellation email is queued when you cancel.`
+    : 'Cancel this signup to open the spot for someone else. A cancellation email is queued when you cancel.';
+}
+
+function cancelledSignupCopy(groupSize: number): string {
+  return groupSize > 1
+    ? `This signup is cancelled. The ${groupSize} spots it held are open for someone else. A cancellation email is queued.`
+    : 'This signup is cancelled. The spot is open for someone else. A cancellation email is queued.';
 }
 
 export function NotFoundPage() {

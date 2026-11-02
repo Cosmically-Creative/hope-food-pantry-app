@@ -5,7 +5,7 @@ import { cancelPendingReminders } from './mail/queue.js';
 import { renderReminder } from './mail/templates.js';
 import type { MailIdentity } from './mail/types.js';
 import { readReminderOffsets, readReplyTo } from './settings.js';
-import { formatInstantInZone } from './time.js';
+import { formatInstantInZone, type ZonedClock } from './time.js';
 import { absoluteUrl } from './url.js';
 
 export type ReminderPass = { queued: number; suppressed: number };
@@ -130,6 +130,69 @@ export function issueReminderOffToken(secret: string, signupId: number): string 
   const id = String(signupId);
   const mac = createHmac('sha256', secret).update(`hope-reminder-off-v1\0${id}`).digest('base64url');
   return `${id}.${mac}`;
+}
+
+export type ReminderPageSignup = {
+  name: string;
+  email: string;
+  phone: string | null;
+  notes: string | null;
+  role: string;
+  eventTitle: string;
+  location: string;
+  when: ZonedClock;
+  groupSize: number;
+  status: 'confirmed' | 'cancelled';
+  ended: boolean;
+  remindersOff: boolean;
+};
+
+/** The signup a reminder link may show. An anonymized row, or a row without a name and email, is omitted. */
+export function readReminderSignup(db: Database.Database, signupId: number, now: string): ReminderPageSignup | null {
+  const row = db
+    .prepare(
+      `SELECT su.name AS name, su.email AS email, su.phone AS phone, su.notes AS notes,
+              su.group_size AS group_size, su.status AS status, su.reminders_off AS reminders_off,
+              s.role AS role, s.starts_at_utc AS starts_at_utc, s.ends_at_utc AS ends_at_utc,
+              e.title AS title, e.location AS location, e.tz AS tz
+       FROM signups su
+       JOIN shifts s ON s.id = su.shift_id
+       JOIN events e ON e.id = s.event_id
+       WHERE su.id = ? AND su.anonymized_at IS NULL`,
+    )
+    .get(signupId) as
+    | {
+        name: string | null;
+        email: string | null;
+        phone: string | null;
+        notes: string | null;
+        group_size: number;
+        status: string;
+        reminders_off: number;
+        role: string;
+        starts_at_utc: string;
+        ends_at_utc: string;
+        title: string;
+        location: string;
+        tz: string;
+      }
+    | undefined;
+  if (!row || !row.name || !row.email) return null;
+  if (row.status !== 'confirmed' && row.status !== 'cancelled') return null;
+  return {
+    name: row.name,
+    email: row.email,
+    phone: row.phone,
+    notes: row.notes,
+    role: row.role,
+    eventTitle: row.title,
+    location: row.location.trim(),
+    when: formatInstantInZone(row.starts_at_utc, row.tz),
+    groupSize: Number(row.group_size),
+    status: row.status,
+    ended: row.ends_at_utc <= now,
+    remindersOff: row.reminders_off === 1,
+  };
 }
 
 export function readReminderOffToken(secret: string, token: string): number | null {

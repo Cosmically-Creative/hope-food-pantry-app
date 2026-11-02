@@ -25,6 +25,8 @@ export type QueuedSignup = {
   mail: MailIdentity;
   now: string;
   linkNote?: string;
+  /** Used when the letter cannot include the private /m/ link. The manage token is stored only as a hash. */
+  pageUrl?: string;
 };
 
 /** Inserts one row per recipient. The same logical message does not get a second row. */
@@ -216,5 +218,5 @@ function queue(
 }
 
 function manageUrl(input: QueuedSignup): string {
-  return absoluteUrl(input.mail, `/m/${input.token}`);
+  return input.pageUrl ?? absoluteUrl(input.mail, `/m/${input.token}`);
 }

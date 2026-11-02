@@ -20,6 +20,11 @@ export function issuePartyToken(secret: string, manageToken: string): string {
   return createHmac('sha256', secret).update(`hope-party-v1\0${manageToken}`).digest('base64url');
 }
 
+/** Binds a cancel POST to the reminder link. It is not the manage token, and a one-click unsubscribe does not send it. */
+export function issueReminderCancelToken(secret: string, unsubscribeToken: string): string {
+  return createHmac('sha256', secret).update(`hope-reminder-cancel-v1\0${unsubscribeToken}`).digest('base64url');
+}
+
 export function cancelTokenMatches(secret: string, manageToken: string, received: string): boolean {
   return tokenMatches(issueCancelToken(secret, manageToken), received);
 }
@@ -34,6 +39,10 @@ export function reminderPageTokenMatches(secret: string, manageToken: string, re
 
 export function partyTokenMatches(secret: string, manageToken: string, received: string): boolean {
   return tokenMatches(issuePartyToken(secret, manageToken), received);
+}
+
+export function reminderCancelTokenMatches(secret: string, unsubscribeToken: string, received: string): boolean {
+  return tokenMatches(issueReminderCancelToken(secret, unsubscribeToken), received);
 }
 
 function tokenMatches(expected: string, received: string): boolean {

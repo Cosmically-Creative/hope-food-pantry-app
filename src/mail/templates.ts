@@ -125,7 +125,8 @@ export function renderReminder(input: {
   const name = singleLine(input.volunteerName);
   const subject = `Reminder: ${role}`;
   const hello = `You are still signed up for ${role}.${partyNote(input.groupSize)}`;
-  const cancelNote = 'To cancel, use the link in your confirmation email.';
+  const spots = input.groupSize && input.groupSize > 1 ? `these ${input.groupSize} spots open` : 'the spot opens';
+  const cancelNote = `To cancel this signup, open ${input.unsubscribeUrl}. You confirm before ${spots} for someone else.`;
   const stopNote = `To stop reminder emails for this signup, open ${input.unsubscribeUrl}. The pantry reads mail sent to ${input.replyTo}. Stopping reminders does not cancel the signup. Confirmation, change, and cancellation emails still arrive.`;
   const greeting = `Hello ${name},`;
   const when = input.shift.whenLabel;
@@ -156,7 +157,8 @@ export function renderReminder(input: {
 <p>${escapeHtml(greeting)}</p>
 <p>${escapeHtml(hello)}</p>
 <p>${escapeHtml(input.shift.eventTitle)}<br>${escapeHtml(when)}${htmlPlace}</p>
-<p>${escapeHtml(cancelNote)}</p>
+<p><a href="${escapeHtml(input.unsubscribeUrl)}" style="color:#222">Cancel this signup</a></p>
+<p>You confirm before ${escapeHtml(spots)} for someone else.</p>
 <p><a href="${escapeHtml(input.unsubscribeUrl)}" style="color:#222">Stop reminder emails</a></p>
 <p>The pantry reads mail sent to ${escapeHtml(input.replyTo)}. Stopping reminders does not cancel the signup. Confirmation, change, and cancellation emails still arrive.</p>
 <p>Hope Food Pantry</p>

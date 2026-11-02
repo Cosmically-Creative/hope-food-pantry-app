@@ -9,6 +9,8 @@ import { loadConfig } from '../src/config.js';
 import { openAppDatabase } from '../src/db.js';
 import { deliverDueMail } from '../src/mail/deliver.js';
 import type { Mailer } from '../src/mail/types.js';
+import { issueReminderCancelToken } from '../src/cancel-token.js';
+import { renderReminder } from '../src/mail/templates.js';
 import { issueReminderOffToken } from '../src/reminders.js';
 import { queueDueReminders } from '../src/reminders.js';
 import { reserveSignup, type ReserveInput } from '../src/signup.js';
@@ -45,14 +47,18 @@ describe('reminder mail', () => {
   it('queues the 48 hour reminder, sends it once, and records provider acceptance', async () => {
     const db = await openDb();
     const shiftId = insertShift(db, LATER_START, LATER_END);
-    reserveSignup(db, reservation(shiftId, { name: 'Pat <script>', now: EARLY }));
+    const saved = reserveSignup(db, reservation(shiftId, { name: 'Pat <script>', now: EARLY }));
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+    const reminderToken = issueReminderOffToken(SECRET, saved.signupId);
     expect(queueDueReminders(db, MAIL, SECRET, NOW)).toEqual({ queued: 1, suppressed: 0 });
     expect(queueDueReminders(db, MAIL, SECRET, NOW)).toEqual({ queued: 0, suppressed: 0 });
 
-    const reminders = db.prepare(`SELECT kind, status, subject, body_html, headers_json FROM outbox WHERE kind = 'reminder'`).all() as Array<{
+    const reminders = db.prepare(`SELECT kind, status, subject, body_text, body_html, headers_json FROM outbox WHERE kind = 'reminder'`).all() as Array<{
       kind: string;
       status: string;
       subject: string;
+      body_text: string;
       body_html: string;
       headers_json: string;
     }>;
@@ -61,8 +67,16 @@ describe('reminder mail', () => {
     ]);
     expect(reminders[0]?.body_html).toContain('Pat &lt;script&gt;');
     expect(reminders[0]?.body_html).not.toContain('<script>');
-    expect(reminders[0]?.body_html).toContain('use the link in your confirmation email');
+    expect(reminders[0]?.body_html).not.toContain('use the link in your confirmation email');
+    expect(reminders[0]?.body_html).toContain(`href="http://127.0.0.1:3000/u/${reminderToken}"`);
+    expect(reminders[0]?.body_html).toContain('>Cancel this signup</a>');
+    expect(reminders[0]?.body_html).toContain('You confirm before the spot opens for someone else.');
+    expect(reminders[0]?.body_html).not.toContain('/cancel');
+    expect(reminders[0]?.body_text).toContain(`http://127.0.0.1:3000/u/${reminderToken}`);
+    expect(reminders[0]?.body_text).toContain('You confirm before the spot opens for someone else.');
     const headers = JSON.parse(reminders[0]?.headers_json ?? '{}') as Record<string, string>;
+    expect(headers['List-Unsubscribe']).toContain(`/u/${reminderToken}`);
+    expect(headers['List-Unsubscribe']).not.toContain('/cancel');
     expect(headers['List-Unsubscribe']).toContain('mailto:volunteer@example.invalid?subject=Stop%20reminder%20emails');
     expect(headers['List-Unsubscribe-Post']).toBe('List-Unsubscribe=One-Click');
     expect(db.prepare(`SELECT kind, sent_at FROM reminders_sent`).get()).toEqual({ kind: '48h', sent_at: null });
@@ -213,12 +227,15 @@ describe('reminder mail', () => {
 
     const visit = await app.request(`/u/${token}`);
     expect(visit.status).toBe(200);
-    expect(await visit.text()).toContain('Stop reminder emails');
+    const visitHtml = await visit.text();
+    expect(visitHtml).toContain('Stop reminder emails');
+    expect(visitHtml).toContain('Cancel this signup');
+    expect(visitHtml).toContain(`/u/${token}/cancel`);
     expect(db.prepare(`SELECT reminders_off, status FROM signups`).get()).toEqual({ reminders_off: 0, status: 'confirmed' });
 
     const stopped = await app.request(`/u/${token}`, { method: 'POST' });
     expect(stopped.status).toBe(200);
-    expect(await stopped.text()).toContain('Reminder emails for this signup are off.');
+    expect(await stopped.text()).toContain('Reminder emails are off. This signup stays.');
     expect(db.prepare(`SELECT reminders_off, status FROM signups`).get()).toEqual({ reminders_off: 1, status: 'confirmed' });
     expect(db.prepare(`SELECT status FROM outbox WHERE kind = 'reminder' AND status = 'pending'`).get()).toBeUndefined();
     expect(db.prepare(`SELECT status FROM outbox WHERE kind = 'confirmation'`).get()).toEqual({ status: 'pending' });
@@ -230,6 +247,128 @@ describe('reminder mail', () => {
     const missing = await app.request('/u/1.not-a-real-mac-value-here');
     expect(missing.status).toBe(404);
     expect(db.prepare(`SELECT reminders_off FROM signups`).get()).toEqual({ reminders_off: 1 });
+
+    const oneClick = await app.request(`/u/${token}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ 'List-Unsubscribe': 'One-Click' }),
+    });
+    expect(oneClick.status).toBe(200);
+    expect(db.prepare(`SELECT reminders_off, status FROM signups`).get()).toEqual({ reminders_off: 1, status: 'confirmed' });
+  });
+
+  it('cancels from the reminder page after a confirmation, and keeps the signup link', async () => {
+    const { app, db } = await buildApp();
+    bootstrapAdmin(db, 'coordinator@example.invalid', EARLY);
+    const shiftId = insertShift(db, LATER_START, LATER_END);
+    const saved = reserveSignup(db, reservation(shiftId, { now: EARLY, groupSize: 1 }));
+    expect(saved.ok && saved.manageToken).toBeTruthy();
+    if (!saved.ok || !saved.manageToken) return;
+    queueDueReminders(db, MAIL, SECRET, NOW);
+    const signupId = saved.signupId;
+    const token = issueReminderOffToken(SECRET, signupId);
+
+    const confirm = await app.request(`/u/${token}/cancel`);
+    expect(confirm.status).toBe(200);
+    const confirmHtml = await confirm.text();
+    expect(confirmHtml).toContain('Are you sure you want to cancel?');
+    expect(confirmHtml).toContain('Cancel this signup to open the spot for someone else.');
+    expect(confirmHtml).toContain('Pat Review');
+    expect(confirmHtml).toContain('Sorting');
+    expect(db.prepare(`SELECT status FROM signups`).get()).toEqual({ status: 'confirmed' });
+    const cancelToken = /name="cancel_token" value="([^"]*)"/.exec(confirmHtml)?.[1] ?? '';
+    expect(cancelToken).toBe(issueReminderCancelToken(SECRET, token));
+
+    const crossSite = await postReminderCancel(app, token, cancelToken, { origin: 'https://evil.example' });
+    expect(crossSite.status).toBe(403);
+    expect(await crossSite.text()).toContain('could not be sent from this page');
+    const missingToken = await postReminderCancel(app, token, '');
+    expect(missingToken.status).toBe(400);
+    expect(await missingToken.text()).toContain('could not be confirmed');
+    const oneClick = await app.request(`/u/${token}/cancel`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ 'List-Unsubscribe': 'One-Click' }),
+    });
+    expect(oneClick.status).toBe(403);
+    expect(db.prepare(`SELECT status, reminders_off FROM signups`).get()).toEqual({ status: 'confirmed', reminders_off: 0 });
+
+    const cancelled = await postReminderCancel(app, token, cancelToken);
+    expect(cancelled.status).toBe(303);
+    expect(cancelled.headers.get('location')).toBe(`/u/${token}`);
+    const after = await app.request(`/u/${token}`);
+    const afterHtml = await after.text();
+    expect(after.status).toBe(200);
+    expect(afterHtml).toContain('This signup is cancelled');
+    expect(afterHtml).toContain('The spot is open for someone else.');
+    expect(afterHtml).not.toContain('name="cancel_token"');
+    expect(afterHtml).not.toContain('Stop reminder emails');
+    expect(db.prepare(`SELECT status FROM signups`).get()).toEqual({ status: 'cancelled' });
+    expect(db.prepare(`SELECT COALESCE(SUM(group_size), 0) AS n FROM signups WHERE status = 'confirmed'`).get()).toEqual({ n: 0 });
+    expect(db.prepare(`SELECT status FROM outbox WHERE kind = 'confirmation'`).get()).toEqual({ status: 'cancelled' });
+    expect(db.prepare(`SELECT status, last_error FROM outbox WHERE kind = 'reminder'`).get()).toEqual({
+      status: 'cancelled',
+      last_error: 'The signup was cancelled before this reminder was sent.',
+    });
+    const letter = db.prepare(`SELECT subject, body_text FROM outbox WHERE kind = 'cancelled'`).get() as { subject: string; body_text: string };
+    expect(letter.subject).toBe('Your signup for Sorting is cancelled');
+    expect(letter.body_text).toContain(`http://127.0.0.1:3000/u/${token}`);
+    expect(letter.body_text).toContain('That link opens the cancelled signup.');
+    expect(letter.body_text).not.toContain('/m/');
+    expect(db.prepare(`SELECT subject FROM outbox WHERE kind = 'notice' ORDER BY id`).all()).toEqual([
+      { subject: 'Pat Review signed up for Sorting' },
+      { subject: "Pat Review's signup for Sorting was cancelled" },
+    ]);
+    const manage = await app.request(`/m/${saved.manageToken}`);
+    expect(manage.status).toBe(200);
+    expect(await manage.text()).toContain('Cancelled');
+
+    const again = await postReminderCancel(app, token, cancelToken);
+    expect(again.status).toBe(303);
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'cancelled'`).get()).toEqual({ n: 1 });
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'notice'`).get()).toEqual({ n: 2 });
+  });
+
+  it('does not cancel a reminder signup after the shift has ended', async () => {
+    const { app, db } = await buildApp();
+    const shiftId = insertShift(db, LATER_START, LATER_END);
+    const saved = reserveSignup(db, reservation(shiftId, { now: EARLY }));
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+    const token = issueReminderOffToken(SECRET, saved.signupId);
+    db.prepare(`UPDATE shifts SET starts_at_utc = ?, ends_at_utc = ? WHERE id = ?`).run(
+      '2026-10-14T15:00:00.000Z',
+      '2026-10-14T17:00:00.000Z',
+      shiftId,
+    );
+
+    const confirm = await app.request(`/u/${token}/cancel`);
+    expect(confirm.status).toBe(303);
+    expect(confirm.headers.get('location')).toBe(`/u/${token}`);
+    const page = await app.request(`/u/${token}`);
+    const html = await page.text();
+    expect(html).toContain('This shift has ended.');
+    expect(html).not.toContain('/cancel');
+    const posted = await postReminderCancel(app, token, issueReminderCancelToken(SECRET, token));
+    expect(posted.status).toBe(400);
+    expect(await posted.text()).toContain('This shift has ended.');
+    expect(db.prepare(`SELECT status FROM signups`).get()).toEqual({ status: 'confirmed' });
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'cancelled'`).get()).toEqual({ n: 0 });
+  });
+
+  it('names every spot when a reminder is for more than one person', () => {
+    const letter = renderReminder({
+      volunteerName: 'Pat',
+      shift: { role: 'Sorting', eventTitle: 'Weekly pantry', location: 'Sioux Center, Iowa', whenLabel: 'Thursday, October 15, 2026, 9:00 AM to 12:00 PM CDT' },
+      unsubscribeUrl: 'https://example.invalid/u/1.token',
+      replyTo: 'volunteer@example.invalid',
+      groupSize: 3,
+    });
+    expect(letter.text).toContain('open https://example.invalid/u/1.token');
+    expect(letter.text).toContain('You confirm before these 3 spots open for someone else.');
+    expect(letter.text).not.toContain('use the link in your confirmation email');
+    expect(letter.html).toContain('href="https://example.invalid/u/1.token"');
+    expect(letter.html).toContain('these 3 spots');
   });
 
   it('turns reminders off from the private signup page and keeps the signup', async () => {
@@ -321,6 +460,22 @@ function insertConfirmed(db: Awaited<ReturnType<typeof openDb>>, shiftId: number
        manage_token_hash, token_expires_at
      ) VALUES (?, 'Ada', ?, ?, 0, 1, 'confirmed', 0, ?, ?, 'abc', ?)`,
   ).run(shiftId, email, email, NOW, NOW, '2026-10-22T17:00:00.000Z');
+}
+
+function postReminderCancel(
+  app: ReturnType<typeof createApp>,
+  token: string,
+  cancelToken: string,
+  options?: { origin?: string },
+) {
+  return app.request(`/u/${token}/cancel`, {
+    method: 'POST',
+    headers: {
+      origin: options?.origin ?? ORIGIN,
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ cancel_token: cancelToken }),
+  });
 }
 
 function reservation(shiftId: number, overrides: Partial<ReserveInput> = {}): ReserveInput {
