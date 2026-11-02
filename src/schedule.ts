@@ -90,6 +90,19 @@ const SHIFT_FROM = `
   LEFT JOIN signups su ON su.shift_id = s.id
 `;
 
+/** Published events in title order. Each entry uses the same upcoming-shift window as its own page. */
+export function listPublishedEvents(db: Database.Database, now: string): PublicEvent[] {
+  const rows = db
+    .prepare(`SELECT slug AS slug FROM events WHERE published = 1 ORDER BY title COLLATE NOCASE, id`)
+    .all() as { slug: string }[];
+  const events: PublicEvent[] = [];
+  for (const row of rows) {
+    const event = getPublishedEvent(db, row.slug, now);
+    if (event) events.push(event);
+  }
+  return events;
+}
+
 export function getPublishedEvent(db: Database.Database, slug: string, now: string): PublicEvent | null {
   const event = db
     .prepare(

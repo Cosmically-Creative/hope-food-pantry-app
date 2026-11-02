@@ -1708,6 +1708,63 @@ article.shift-card {
   box-shadow: var(--hope-shadow);
 }
 
+.public-events {
+  list-style: none;
+  display: grid;
+  gap: 1rem;
+  margin: 1.25rem 0 0;
+  padding: 0;
+}
+
+.public-event {
+  display: grid;
+  gap: 0.2rem;
+  padding: 1.15rem 1.35rem 1.25rem;
+  background: #fff;
+  border-radius: 1.75rem;
+  box-shadow: var(--hope-shadow);
+  color: var(--hope-ink);
+  text-decoration: none;
+}
+
+.public-event:hover,
+.public-event:focus-visible {
+  background: var(--hope-blue-100);
+  color: var(--hope-ink);
+  text-decoration: none;
+}
+
+.public-event-title {
+  font-size: 1.85rem;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.public-event-location,
+.public-event-meta {
+  color: var(--hope-ink-2);
+}
+
+.public-event-description {
+  white-space: pre-wrap;
+}
+
+.public-event-go {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.55rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--hope-border);
+  font-weight: 650;
+}
+
+.public-event-go img {
+  width: auto;
+  height: 1.15rem;
+}
+
 /* Forms */
 
 .signup-form,
@@ -1897,6 +1954,24 @@ article.shift-card {
   padding: 0;
   border-radius: 0.2rem;
   box-shadow: none;
+}
+
+.check-copy {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.check:has(.check-copy) {
+  align-items: flex-start;
+}
+
+.check:has(.check-copy) input {
+  margin-top: 0.2rem;
+}
+
+.check-copy .hint {
+  font-size: 0.92rem;
+  line-height: 1.35;
 }
 
 .hint {
@@ -4840,6 +4915,11 @@ main > .crumb,
   align-items: center;
   align-self: center;
   min-height: 2.75rem;
+}
+
+.event-fields > .check:has(.check-copy) {
+  align-items: flex-start;
+  align-self: start;
 }
 
 .event-fields > button {

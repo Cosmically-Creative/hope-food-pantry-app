@@ -5,8 +5,8 @@ import type { Child } from 'hono/jsx';
 import { registerAdmin } from './admin-http.js';
 import { readSession } from './auth/session.js';
 import type { AppConfig } from './config.js';
-import { EmptySchedulePage, EventPage, Layout, NotFoundPage, ProblemPage } from './pages.js';
-import { getPublishedEvent } from './schedule.js';
+import { EmptySchedulePage, EventListPage, EventPage, Layout, NotFoundPage, ProblemPage } from './pages.js';
+import { getPublishedEvent, listPublishedEvents } from './schedule.js';
 import { registerReminderOff } from './reminder-http.js';
 import { registerPublicSignup } from './signup-http.js';
 import { securityHeaders } from './security.js';
@@ -61,17 +61,25 @@ export function createApp(
 
   app.get(appPath(config, '/'), (c) => {
     const at = now();
-    const event = getPublishedEvent(db, 'weekly-pantry', at);
-    if (!event) {
-      return page(c, config, db, at, 'Weekly pantry · Hope Volunteer', <EmptySchedulePage />);
+    const events = listPublishedEvents(db, at);
+    const only = events.length === 1 ? events[0] : undefined;
+    if (only) {
+      return page(
+        c,
+        config,
+        db,
+        at,
+        `${only.title} · Hope Volunteer`,
+        <EventPage config={config} event={only} now={at} month={c.req.query('month')} view={c.req.query('view')} path="/" />,
+      );
     }
     return page(
       c,
       config,
       db,
       at,
-      `${event.title} · Hope Volunteer`,
-      <EventPage config={config} event={event} now={at} month={c.req.query('month')} view={c.req.query('view')} path="/" />,
+      'Volunteer shifts · Hope Volunteer',
+      events.length === 0 ? <EmptySchedulePage /> : <EventListPage config={config} events={events} />,
     );
   });
 

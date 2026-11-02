@@ -219,10 +219,43 @@ export function Layout(props: {
 export function EmptySchedulePage() {
   return (
     <>
-      <h1>Weekly pantry</h1>
-      <p class="empty">No upcoming shifts are posted.</p>
+      <h1>Volunteer shifts</h1>
+      <p class="empty">No events are posted.</p>
     </>
   );
+}
+
+export function EventListPage(props: { config: AppConfig; events: PublicEvent[] }) {
+  return (
+    <>
+      <h1>Volunteer shifts</h1>
+      <ul class="public-events" aria-label="Published events">
+        {props.events.map((event) => {
+          const description = event.description.trim();
+          return (
+            <li key={event.id}>
+              <a class="public-event" href={appPath(props.config, `/e/${encodeURIComponent(event.slug)}`)}>
+                <span class="public-event-title">{event.title}</span>
+                {event.location ? <span class="public-event-location">{event.location}</span> : null}
+                {description ? <span class="public-event-description">{description}</span> : null}
+                <span class="public-event-meta">{postedShiftLabel(event.shifts.length)}</span>
+                <span class="public-event-go">
+                  View shifts
+                  <img src={asset(props.config, '/img/icons/right-arrow.svg')} alt="" />
+                </span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </>
+  );
+}
+
+function postedShiftLabel(count: number): string {
+  if (count === 0) return 'No upcoming shifts are posted.';
+  if (count === 1) return '1 upcoming shift';
+  return `${count} upcoming shifts`;
 }
 
 export function EventPage(props: {

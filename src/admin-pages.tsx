@@ -1792,7 +1792,10 @@ function EventForm(props: {
       )}
       <label class="check">
         <input type="checkbox" name="published" value="yes" checked={props.values.published ? true : undefined} />
-        Show this event on the public list
+        <span class="check-copy">
+          Show this event on the public list
+          <span class="hint">The sign-up page lists every checked event. When only one event is checked, its shifts open directly.</span>
+        </span>
       </label>
       <button type="submit">{props.submitLabel}</button>
     </form>

@@ -500,10 +500,83 @@ describe('public pages', () => {
     expect(later).toContain('Wednesday Sorting');
   });
 
-  it('shows an empty list when nothing is upcoming', async () => {
+  it('shows an empty sign-up page when no event is posted', async () => {
     const { app } = await buildApp({ empty: true });
     const html = await (await app.request('/')).text();
+    expect(html).toContain('<title>Volunteer shifts · Hope Volunteer</title>');
+    expect(html).toContain('<h1>Volunteer shifts</h1>');
+    expect(html).toContain('No events are posted.');
+    expect(html).not.toContain('Weekly pantry');
+  });
+
+  it('opens the only published event on the sign-up page', async () => {
+    const { app, db } = await buildApp({ empty: true });
+    const eventId = insertEvent(db, {
+      slug: 'volunteer-shifts',
+      title: 'Volunteer Shifts',
+      description: 'Bring a box.',
+      published: 1,
+    });
+    insertShift(db, eventId, 'Bagging', '2026-10-21', '09:00', '12:00', 4, 0);
+    insertEvent(db, {
+      slug: 'hidden-drive',
+      title: 'Hidden drive',
+      description: '',
+      published: 0,
+    });
+
+    const html = await (await app.request('/')).text();
+    expect(html).toContain('<title>Volunteer Shifts · Hope Volunteer</title>');
+    expect(html).toContain('<h1>Volunteer Shifts</h1>');
+    expect(html).toContain('Bring a box.');
+    expect(html).toContain('Bagging');
+    expect(html).toContain('href="/?view=calendar"');
+    expect(html).not.toContain('No events are posted.');
+    expect(html).not.toContain('Hidden drive');
+    expect(html).not.toContain('Weekly pantry');
+
+    const event = await app.request('/e/volunteer-shifts');
+    expect(event.status).toBe(200);
+    expect(await event.text()).toContain('Bagging');
+    expect((await app.request('/e/hidden-drive')).status).toBe(404);
+  });
+
+  it('lists every published event and links to its page', async () => {
+    const { app, db } = await buildApp();
+    const drive = insertEvent(db, {
+      slug: 'volunteer-shifts',
+      title: 'Volunteer Shifts',
+      description: 'Bring a box.',
+      published: 1,
+    });
+    insertShift(db, drive, 'Bagging', '2026-10-21', '09:00', '12:00', 4, 0);
+    insertEvent(db, {
+      slug: 'food-drive',
+      title: 'Food drive',
+      description: '',
+      published: 1,
+    });
+
+    const html = await (await app.request('/')).text();
+    expect(html).toContain('<h1>Volunteer shifts</h1>');
+    expect(html).toContain('aria-label="Published events"');
+    expect(html).toContain('View shifts');
+    expect(html).toContain('href="/e/food-drive"');
+    expect(html).toContain('href="/e/volunteer-shifts"');
+    expect(html).toContain('href="/e/weekly-pantry"');
+    expect(html).toContain('Bring a box.');
+    expect(html).toContain('1 upcoming shift');
+    expect(html).toContain('6 upcoming shifts');
     expect(html).toContain('No upcoming shifts are posted.');
+    expect(html.indexOf('Food drive')).toBeLessThan(html.indexOf('Volunteer Shifts'));
+    expect(html.indexOf('Volunteer Shifts')).toBeLessThan(html.indexOf('Weekly pantry'));
+    expect(html).not.toContain('Hidden draft');
+    expect(html).not.toContain('Bagging');
+    expect(html).not.toContain('class="day-card"');
+
+    const event = await (await app.request('/e/volunteer-shifts')).text();
+    expect(event).toContain('Bagging');
+    expect(event).toContain('Bring a box.');
   });
 });
 
