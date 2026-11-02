@@ -14,7 +14,9 @@ type DueSignup = {
   id: number;
   name: string;
   email_norm: string;
+  created_at: string;
   version: number;
+  version_at: string | null;
   starts_at_utc: string;
   ends_at_utc: string;
   role: string;
@@ -27,8 +29,9 @@ type DueSignup = {
 
 /**
  * Queues reminders that are due and still before the shift starts.
+ * A reminder whose due time was before the signup, or before this shift version, is skipped.
  * When more than one offset is already due, only the closest one is sent.
- * Older offsets are recorded as not sent, so a late signup does not get every missed reminder.
+ * Older offsets are recorded as not sent.
  * The same signup, offset, and shift version is not queued twice.
  * Offset hours and the reply-to address come from coordinator settings, or the defaults when none are saved.
  */
@@ -39,7 +42,8 @@ export function queueDueReminders(db: Database.Database, mail: MailIdentity, sec
     const rows = db
       .prepare(
         `SELECT su.id AS id, su.name AS name, su.email_norm AS email_norm, su.group_size AS group_size,
-                su.shift_id AS shift_id, s.version AS version, s.starts_at_utc AS starts_at_utc,
+                su.created_at AS created_at, su.shift_id AS shift_id, s.version AS version,
+                s.version_at AS version_at, s.starts_at_utc AS starts_at_utc,
                 s.ends_at_utc AS ends_at_utc, s.role AS role,
                 e.title AS title, e.location AS location, e.tz AS tz
          FROM signups su
@@ -59,9 +63,12 @@ export function queueDueReminders(db: Database.Database, mail: MailIdentity, sec
     const nowInstant = Temporal.Instant.from(now);
     for (const row of rows) {
       const start = Temporal.Instant.from(row.starts_at_utc);
+      const anchor = reminderAnchor(row.created_at, row.version_at);
       const due = offsets.filter((offset) => {
         const dueAt = start.subtract({ hours: offset.hours });
-        return Temporal.Instant.compare(nowInstant, dueAt) >= 0 && !alreadyQueued(db, row.id, offset.kind, row.version);
+        return Temporal.Instant.compare(dueAt, anchor) >= 0
+          && Temporal.Instant.compare(nowInstant, dueAt) >= 0
+          && !alreadyQueued(db, row.id, offset.kind, row.version);
       });
       if (due.length === 0) continue;
       const nearest = due.reduce((closest, offset) => (offset.hours < closest.hours ? offset : closest));
@@ -134,6 +141,14 @@ export function readReminderOffToken(secret: string, token: string): number | nu
   const right = Buffer.from(token);
   if (left.length !== right.length || !timingSafeEqual(left, right)) return null;
   return id;
+}
+
+/** The later of the signup and the current shift version. A move starts a new signup. */
+function reminderAnchor(createdAt: string, versionAt: string | null): Temporal.Instant {
+  const signedUp = Temporal.Instant.from(createdAt);
+  if (!versionAt) return signedUp;
+  const changed = Temporal.Instant.from(versionAt);
+  return Temporal.Instant.compare(changed, signedUp) > 0 ? changed : signedUp;
 }
 
 function alreadyQueued(db: Database.Database, signupId: number, kind: string, version: number): boolean {

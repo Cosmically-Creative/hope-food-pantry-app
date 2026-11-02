@@ -216,7 +216,7 @@ function insertSignup(db: Awaited<ReturnType<typeof buildApp>>['db'], shiftId: n
     `INSERT INTO signups (
        shift_id, name, email, email_norm, is_minor, group_size, status, reminders_off, created_at, updated_at
      ) VALUES (?, 'Ada', 'ada@example.invalid', 'ada@example.invalid', 0, 1, 'confirmed', 0, ?, ?)`,
-  ).run(shiftId, NOW, NOW);
+  ).run(shiftId, '2026-10-13T18:00:00.000Z', '2026-10-13T18:00:00.000Z');
 }
 
 function magicToken(db: Awaited<ReturnType<typeof buildApp>>['db']): string {

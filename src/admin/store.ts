@@ -1626,10 +1626,10 @@ function bumpAndNotify(db: Database.Database, shiftId: number, now: string, mail
   const bumped = db
     .prepare(
       manual
-        ? 'UPDATE shifts SET version = version + 1, manually_modified = 1 WHERE id = ? AND cancelled = 0'
-        : 'UPDATE shifts SET version = version + 1 WHERE id = ? AND cancelled = 0 AND manually_modified = 0',
+        ? 'UPDATE shifts SET version = version + 1, version_at = ?, manually_modified = 1 WHERE id = ? AND cancelled = 0'
+        : 'UPDATE shifts SET version = version + 1, version_at = ? WHERE id = ? AND cancelled = 0 AND manually_modified = 0',
     )
-    .run(shiftId);
+    .run(now, shiftId);
   if (bumped.changes !== 1) return 0;
   db.prepare(
     `UPDATE outbox

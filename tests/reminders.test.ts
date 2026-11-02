@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { updateShift } from '../src/admin/store.js';
+import { moveSignup, updateShift } from '../src/admin/store.js';
 import { createApp } from '../src/app.js';
 import { bootstrapAdmin } from '../src/auth/bootstrap.js';
 import { loadConfig } from '../src/config.js';
@@ -15,6 +15,10 @@ import { reserveSignup, type ReserveInput } from '../src/signup.js';
 import { devEnv } from './env.js';
 
 const NOW = '2026-10-14T18:00:00.000Z';
+const EARLY = '2026-10-01T15:00:00.000Z';
+const INSIDE_START = '2026-10-16T00:00:00.000Z';
+const INSIDE_END = '2026-10-16T03:00:00.000Z';
+const INSIDE_NEAR = '2026-10-15T22:00:00.000Z';
 const SOON = '2026-10-14T18:30:00.000Z';
 const SOON_END = '2026-10-14T20:00:00.000Z';
 const LATER_START = '2026-10-15T14:00:00.000Z';
@@ -41,7 +45,7 @@ describe('reminder mail', () => {
   it('queues the 48 hour reminder, sends it once, and records provider acceptance', async () => {
     const db = await openDb();
     const shiftId = insertShift(db, LATER_START, LATER_END);
-    reserveSignup(db, reservation(shiftId, { name: 'Pat <script>' }));
+    reserveSignup(db, reservation(shiftId, { name: 'Pat <script>', now: EARLY }));
     expect(queueDueReminders(db, MAIL, SECRET, NOW)).toEqual({ queued: 1, suppressed: 0 });
     expect(queueDueReminders(db, MAIL, SECRET, NOW)).toEqual({ queued: 0, suppressed: 0 });
 
@@ -83,7 +87,7 @@ describe('reminder mail', () => {
   it('sends only the closest reminder when several are already due', async () => {
     const db = await openDb();
     const shiftId = insertShift(db, SOON, SOON_END);
-    reserveSignup(db, reservation(shiftId, { email: 'late@example.invalid', operationId: 'late-signup' }));
+    reserveSignup(db, reservation(shiftId, { email: 'late@example.invalid', operationId: 'late-signup', now: EARLY }));
     expect(queueDueReminders(db, MAIL, SECRET, NOW)).toEqual({ queued: 1, suppressed: 1 });
     const rows = db.prepare(`SELECT status, body_text FROM outbox WHERE kind = 'reminder' ORDER BY id`).all() as Array<{ status: string; body_text: string }>;
     expect(rows.map((row) => row.status)).toEqual(['pending', 'cancelled']);
@@ -91,6 +95,18 @@ describe('reminder mail', () => {
     expect(db.prepare(`SELECT kind FROM reminders_sent ORDER BY kind`).all()).toEqual([{ kind: '2h' }, { kind: '48h' }]);
     expect(queueDueReminders(db, MAIL, SECRET, NOW)).toEqual({ queued: 0, suppressed: 0 });
     expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'reminder'`).get()).toEqual({ n: 2 });
+  });
+
+  it('does not queue a reminder that was already due before the signup', async () => {
+    const db = await openDb();
+    const shiftId = insertShift(db, INSIDE_START, INSIDE_END);
+    reserveSignup(db, reservation(shiftId, { email: 'thirty@example.invalid', operationId: 'thirty-hours' }));
+    expect(queueDueReminders(db, MAIL, SECRET, NOW)).toEqual({ queued: 0, suppressed: 0 });
+    expect(db.prepare(`SELECT kind FROM outbox`).all()).toEqual([{ kind: 'confirmation' }]);
+
+    expect(queueDueReminders(db, MAIL, SECRET, INSIDE_NEAR)).toEqual({ queued: 1, suppressed: 0 });
+    expect(db.prepare(`SELECT kind FROM reminders_sent`).get()).toEqual({ kind: '2h' });
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'reminder'`).get()).toEqual({ n: 1 });
   });
 
   it('does not queue a reminder after the shift has started, or when reminders are off', async () => {
@@ -112,7 +128,7 @@ describe('reminder mail', () => {
     const db = await openDb();
     bootstrapAdmin(db, 'coordinator@example.invalid', NOW);
     const shiftId = insertShift(db, LATER_START, LATER_END);
-    reserveSignup(db, reservation(shiftId));
+    reserveSignup(db, reservation(shiftId, { now: EARLY }));
     queueDueReminders(db, MAIL, SECRET, NOW);
     db.prepare(`UPDATE signups SET reminders_off = 1 WHERE email_norm = 'pat.review@example.invalid'`).run();
     const mailer: Mailer = { async send() { return { result: 'sent', providerId: null }; } };
@@ -125,10 +141,11 @@ describe('reminder mail', () => {
     expect(db.prepare(`SELECT sent_at FROM reminders_sent`).get()).toEqual({ sent_at: null });
 
     db.prepare(`UPDATE signups SET reminders_off = 0 WHERE email_norm = 'pat.review@example.invalid'`).run();
-    const changed = updateShift(db, 1, shiftId, { role: 'Intake', date: '2026-10-15', start: '09:00', end: '12:00', capacity: 4 }, NOW, MAIL);
+    const changed = updateShift(db, 1, shiftId, { role: 'Intake', date: '2026-10-17', start: '09:00', end: '12:00', capacity: 4 }, NOW, MAIL);
     expect(changed.ok).toBe(true);
     expect(db.prepare(`SELECT status FROM outbox WHERE kind = 'reminder' AND subject = 'Reminder: Sorting'`).get()).toEqual({ status: 'cancelled' });
-    expect(queueDueReminders(db, MAIL, SECRET, NOW)).toEqual({ queued: 1, suppressed: 0 });
+    expect(queueDueReminders(db, MAIL, SECRET, NOW)).toEqual({ queued: 0, suppressed: 0 });
+    expect(queueDueReminders(db, MAIL, SECRET, '2026-10-15T14:00:00.000Z')).toEqual({ queued: 1, suppressed: 0 });
     expect(db.prepare(`SELECT subject, status FROM outbox WHERE kind = 'reminder' AND status = 'pending'`).get()).toEqual({
       subject: 'Reminder: Intake',
       status: 'pending',
@@ -139,10 +156,55 @@ describe('reminder mail', () => {
     ]);
   });
 
+  it('does not queue a reminder that was already due before the shift changed', async () => {
+    const db = await openDb();
+    bootstrapAdmin(db, 'coordinator@example.invalid', EARLY);
+    const shiftId = insertShift(db, FAR_START, FAR_END);
+    reserveSignup(db, reservation(shiftId, { now: EARLY, operationId: 'before-change' }));
+    expect(queueDueReminders(db, MAIL, SECRET, NOW)).toEqual({ queued: 0, suppressed: 0 });
+
+    const changed = updateShift(
+      db,
+      1,
+      shiftId,
+      { role: 'Sorting', date: '2026-10-15', start: '19:00', end: '22:00', capacity: 4 },
+      NOW,
+      MAIL,
+    );
+    expect(changed.ok).toBe(true);
+    expect(db.prepare(`SELECT starts_at_utc AS starts_at_utc FROM shifts WHERE id = ?`).get(shiftId)).toEqual({
+      starts_at_utc: INSIDE_START,
+    });
+    expect(queueDueReminders(db, MAIL, SECRET, NOW)).toEqual({ queued: 0, suppressed: 0 });
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'reminder'`).get()).toEqual({ n: 0 });
+
+    expect(queueDueReminders(db, MAIL, SECRET, INSIDE_NEAR)).toEqual({ queued: 1, suppressed: 0 });
+    expect(db.prepare(`SELECT kind, shift_version FROM reminders_sent`).get()).toEqual({ kind: '2h', shift_version: 2 });
+  });
+
+  it('does not queue a reminder that was already due before the signup moved', async () => {
+    const db = await openDb();
+    bootstrapAdmin(db, 'coordinator@example.invalid', EARLY);
+    const sourceId = insertShift(db, FAR_START, FAR_END, 'source-shift');
+    const eventId = (db.prepare(`SELECT event_id AS event_id FROM shifts WHERE id = ?`).get(sourceId) as { event_id: number }).event_id;
+    const destinationId = insertShiftOnEvent(db, eventId, INSIDE_START, INSIDE_END);
+    const saved = reserveSignup(db, reservation(sourceId, { now: EARLY, operationId: 'before-move' }));
+    expect(saved.ok).toBe(true);
+    if (!saved.ok) return;
+
+    const moved = moveSignup(db, 1, saved.signupId, destinationId, 'move-inside', NOW, MAIL);
+    expect(moved.ok).toBe(true);
+    expect(queueDueReminders(db, MAIL, SECRET, NOW)).toEqual({ queued: 0, suppressed: 0 });
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM outbox WHERE kind = 'reminder'`).get()).toEqual({ n: 0 });
+
+    expect(queueDueReminders(db, MAIL, SECRET, INSIDE_NEAR)).toEqual({ queued: 1, suppressed: 0 });
+    expect(db.prepare(`SELECT kind, shift_version FROM reminders_sent`).get()).toEqual({ kind: '2h', shift_version: 1 });
+  });
+
   it('turns reminders off from the email link without cancelling, and leaves a visit unchanged', async () => {
     const { app, db } = await buildApp();
     const shiftId = insertShift(db, LATER_START, LATER_END);
-    const saved = reserveSignup(db, reservation(shiftId));
+    const saved = reserveSignup(db, reservation(shiftId, { now: EARLY }));
     expect(saved.ok).toBe(true);
     if (!saved.ok) return;
     queueDueReminders(db, MAIL, SECRET, NOW);
@@ -173,7 +235,7 @@ describe('reminder mail', () => {
   it('turns reminders off from the private signup page and keeps the signup', async () => {
     const { app, db } = await buildApp();
     const shiftId = insertShift(db, LATER_START, LATER_END);
-    const saved = reserveSignup(db, reservation(shiftId));
+    const saved = reserveSignup(db, reservation(shiftId, { now: EARLY }));
     expect(saved.ok && saved.manageToken).toBeTruthy();
     if (!saved.ok || !saved.manageToken) return;
     queueDueReminders(db, MAIL, SECRET, NOW);
@@ -226,6 +288,15 @@ async function buildApp() {
 
 function rootOf(db: { name: string }): string {
   return path.dirname(path.dirname(db.name));
+}
+
+function insertShiftOnEvent(db: Awaited<ReturnType<typeof openDb>>, eventId: number, start: string, end: string): number {
+  return Number(
+    db.prepare(
+      `INSERT INTO shifts (event_id, role, starts_at_utc, ends_at_utc, capacity, notes, cancelled)
+       VALUES (?, 'Intake', ?, ?, 4, '', 0)`,
+    ).run(eventId, start, end).lastInsertRowid,
+  );
 }
 
 function insertShift(db: Awaited<ReturnType<typeof openDb>>, start: string, end: string, slug = 'weekly'): number {
