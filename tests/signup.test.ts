@@ -293,6 +293,7 @@ describe('capacity-safe signup', () => {
     const formHtml = await form.text();
     expect(formHtml).toContain('How many people?');
     expect(formHtml).toContain('This signup holds that many spots.');
+    expect(formHtml).toContain('Your full name is listed on the public sign-up page.');
     expect(formHtml).toContain('value="4"');
 
     const saved = await postSignup(

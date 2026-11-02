@@ -1794,6 +1794,27 @@ article.shift-card {
   font-size: 1.6rem;
 }
 
+.signup-lead {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.signup-lead p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.signup-note {
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--hope-ink-2);
+}
+
+.signup-form .hint {
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
 .name-pair {
   display: grid;
   grid-template-columns: 1fr 1fr;

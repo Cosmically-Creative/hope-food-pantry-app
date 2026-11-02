@@ -36,6 +36,8 @@ describe('public pages', () => {
     expect(html).toContain('Wednesday Sorting');
     expect(html).toContain('Wednesday Greeting');
     expect(html).toContain('Lane Wednesday');
+    expect(html).toContain('<meta name="robots" content="noindex"');
+    expect(home.headers.get('x-robots-tag')).toBe('noindex');
     expect(html).toContain('class="roster-mark" src="/img/sunburst.png?v=');
     expect(html).toContain('Live Greeting');
     expect(html).toContain('0/2 spots filled');
@@ -116,6 +118,8 @@ describe('public pages', () => {
     expect(eventHtml).toContain('Sioux Center, Iowa');
     expect(eventHtml).toContain('Wednesday Sorting');
     expect(eventHtml).toContain('Lane Wednesday');
+    expect(eventHtml).toContain('<meta name="robots" content="noindex"');
+    expect(event.headers.get('x-robots-tag')).toBe('noindex');
     expect(eventHtml).toContain('Sign up');
     expect(eventHtml).not.toContain('shift-calendar');
     expect(eventHtml).not.toContain('November 2026');
@@ -164,6 +168,9 @@ describe('public pages', () => {
     expect(shiftHtml).toContain('name="last_name"');
     expect(shiftHtml).toContain('First name');
     expect(shiftHtml).toContain('Last name');
+    expect(shiftHtml).toContain('class="signup-note">Your full name is listed on the public sign-up page. Email, phone, and notes stay off that page.');
+    expect(shiftHtml).not.toContain('name="robots"');
+    expect(shift.headers.get('x-robots-tag')).toBeNull();
     expect(shiftHtml).toContain('https://challenges.cloudflare.com/turnstile/v0/api.js');
     expect(shiftHtml).not.toContain('data-under-18');
     expect(shiftHtml).not.toContain('data-guardian');
@@ -506,6 +513,7 @@ describe('public pages', () => {
     expect(html).toContain('<title>Volunteer shifts · Hope Volunteer</title>');
     expect(html).toContain('<h1>Volunteer shifts</h1>');
     expect(html).toContain('No events are posted.');
+    expect(html).not.toContain('name="robots"');
     expect(html).not.toContain('Weekly pantry');
   });
 
@@ -557,7 +565,10 @@ describe('public pages', () => {
       published: 1,
     });
 
-    const html = await (await app.request('/')).text();
+    const home = await app.request('/');
+    const html = await home.text();
+    expect(home.headers.get('x-robots-tag')).toBeNull();
+    expect(html).not.toContain('name="robots"');
     expect(html).toContain('<h1>Volunteer shifts</h1>');
     expect(html).toContain('aria-label="Published events"');
     expect(html).toContain('View shifts');
@@ -574,7 +585,10 @@ describe('public pages', () => {
     expect(html).not.toContain('Bagging');
     expect(html).not.toContain('class="day-card"');
 
-    const event = await (await app.request('/e/volunteer-shifts')).text();
+    const eventResponse = await app.request('/e/volunteer-shifts');
+    const event = await eventResponse.text();
+    expect(eventResponse.headers.get('x-robots-tag')).toBe('noindex');
+    expect(event).toContain('<meta name="robots" content="noindex"');
     expect(event).toContain('Bagging');
     expect(event).toContain('Bring a box.');
   });

@@ -71,6 +71,8 @@ export function createApp(
         at,
         `${only.title} · Hope Volunteer`,
         <EventPage config={config} event={only} now={at} month={c.req.query('month')} view={c.req.query('view')} path="/" />,
+        200,
+        { noindex: true },
       );
     }
     return page(
@@ -99,6 +101,8 @@ export function createApp(
       at,
       `${event.title} · Hope Volunteer`,
       <EventPage config={config} event={event} now={at} month={c.req.query('month')} view={c.req.query('view')} />,
+      200,
+      { noindex: true },
     );
   });
 
@@ -142,11 +146,13 @@ function page(
   title: string,
   body: Child,
   status: 200 | 404 | 500 = 200,
+  options?: { noindex?: boolean },
 ) {
   c.header('Cache-Control', 'no-store');
+  if (options?.noindex) c.header('X-Robots-Tag', 'noindex');
   const account = readSession(db, c.req.header('cookie'), now);
   return c.html(
-    <Layout config={config} title={title} path={c.req.path} account={account ? { csrf: account.csrf } : null}>
+    <Layout config={config} title={title} path={c.req.path} noindex={options?.noindex} account={account ? { csrf: account.csrf } : null}>
       {body}
     </Layout>,
     status,

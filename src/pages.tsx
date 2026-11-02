@@ -26,6 +26,7 @@ export function Layout(props: {
   title: string;
   path?: string;
   turnstile?: boolean;
+  noindex?: boolean;
   account?: { csrf: string } | null;
   children?: Child;
 }) {
@@ -44,6 +45,7 @@ export function Layout(props: {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        {props.noindex ? <meta name="robots" content="noindex" /> : null}
         <title>{props.title}</title>
         <link rel="icon" href={asset(props.config, '/img/favicons/favicon.png')} />
         <link rel="apple-touch-icon" href={asset(props.config, '/img/favicons/favicon-apple.png')} />
@@ -1041,7 +1043,10 @@ function SignupForm(props: { config: AppConfig; shiftId: number; remaining: numb
   return (
     <form class="signup-form" method="post" action={appPath(props.config, `/s/${props.shiftId}`)}>
       <h2>Sign up</h2>
-      <p>Choose how many people are coming, including you. This signup holds that many spots under your name. Another person can use the same email address.</p>
+      <div class="signup-lead">
+        <p>Choose how many people are coming, including you. This signup holds that many spots under your name. Another person can use the same email address.</p>
+        <p class="signup-note">Your full name is listed on the public sign-up page. Email, phone, and notes stay off that page.</p>
+      </div>
       <noscript>
         <p class="error">Signing up needs JavaScript for the abuse check. The pantry has not published a contact method for help with signup.</p>
       </noscript>
@@ -1110,7 +1115,7 @@ function SignupForm(props: { config: AppConfig; shiftId: number; remaining: numb
         ) : null}
       </label>
       <div class="cf-turnstile" data-sitekey={form.siteKey} data-action="signup" />
-      <p id="signup-turnstile-hint">This check confirms the signup came from a browser.</p>
+      <p class="signup-note" id="signup-turnstile-hint">This check confirms the signup came from a browser.</p>
       <button type="submit">Sign up</button>
     </form>
   );
