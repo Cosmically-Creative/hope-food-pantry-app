@@ -295,6 +295,7 @@ describe('capacity-safe signup', () => {
     expect(formHtml).toContain('This signup holds that many spots.');
     expect(formHtml).toContain('Your full name is listed on the public sign-up page.');
     expect(formHtml).toContain('value="4"');
+    expect(formHtml).not.toContain('name="dates"');
 
     const saved = await postSignup(
       app,
@@ -392,6 +393,186 @@ describe('capacity-safe signup', () => {
     expect(await missing.text()).toContain('That page is not available');
     expect(db.prepare("SELECT status FROM signups WHERE email_norm = 'link@example.invalid'").get()).toEqual({ status: 'confirmed' });
   });
+
+  it('saves several dates from one signup form', async () => {
+    const { app, db, shiftId } = await buildApp({ capacity: 4 });
+    const secondId = insertExtraShift(db, { capacity: 4, starts: '2026-10-22T14:00:00.000Z', ends: '2026-10-22T17:00:00.000Z' });
+    const thirdId = insertExtraShift(db, { capacity: 4, starts: '2026-10-29T14:00:00.000Z', ends: '2026-10-29T17:00:00.000Z' });
+    const otherHours = insertExtraShift(db, { capacity: 4, starts: '2026-10-22T16:00:00.000Z', ends: '2026-10-22T19:00:00.000Z' });
+    const otherRole = insertExtraShift(db, {
+      capacity: 4,
+      role: 'Intake',
+      starts: '2026-11-05T14:00:00.000Z',
+      ends: '2026-11-05T17:00:00.000Z',
+    });
+    const fullId = insertExtraShift(db, { capacity: 1, starts: '2026-11-05T14:00:00.000Z', ends: '2026-11-05T17:00:00.000Z' });
+    db.prepare(
+      `INSERT INTO signups (
+         shift_id, name, email, email_norm, is_minor, group_size, status, reminders_off, created_at, updated_at
+       ) VALUES (?, 'Full Person', 'full.person@example.invalid', 'full.person@example.invalid', 0, 1, 'confirmed', 0, ?, ?)`,
+    ).run(fullId, NOW, NOW);
+
+    const closedId = insertExtraShift(db, {
+      cancelled: 1,
+      starts: '2026-11-12T14:00:00.000Z',
+      ends: '2026-11-12T17:00:00.000Z',
+    });
+    const elsewhereId = insertEventShift(db, {
+      slug: 'holiday-pantry',
+      title: 'Holiday pantry',
+      published: 1,
+      role: 'Delivery',
+      starts: '2026-11-19T15:00:00.000Z',
+      ends: '2026-11-19T18:00:00.000Z',
+    });
+    const unpublishedId = insertEventShift(db, {
+      slug: 'draft-pantry',
+      title: 'Draft pantry',
+      published: 0,
+      role: 'Hidden',
+      starts: '2026-11-19T15:00:00.000Z',
+      ends: '2026-11-19T18:00:00.000Z',
+    });
+
+    const form = await app.request(`/s/${shiftId}`);
+    const formHtml = await form.text();
+    expect(formHtml.indexOf('name="notes"')).toBeLessThan(formHtml.indexOf('More Dates?'));
+    expect(formHtml).toContain('More Dates?');
+    expect(formHtml).not.toContain('Select all dates');
+    expect(formHtml).toContain('Thursday, October 15, 2026');
+    expect(formHtml).toContain('Thursday, October 22, 2026');
+    expect(formHtml).toContain('Thursday, October 29, 2026');
+    expect(formHtml).toContain('9:00 AM to 12:00 PM');
+    expect(dateBox(formHtml, shiftId)).toBe('');
+    expect(dateBox(formHtml, secondId)).not.toContain('checked');
+    expect(dateBox(formHtml, secondId)).toContain('name="dates"');
+    expect(dateChoice(formHtml, secondId)).toContain('Sorting');
+    expect(dateBox(formHtml, thirdId)).not.toContain('checked');
+    expect(dateBox(formHtml, otherHours)).toContain('name="dates"');
+    expect(dateChoice(formHtml, otherHours)).toContain('11:00 AM to 2:00 PM');
+    expect(dateBox(formHtml, otherRole)).toContain('name="dates"');
+    expect(dateChoice(formHtml, otherRole)).toContain('Intake');
+    expect(dateBox(formHtml, elsewhereId)).toContain('name="dates"');
+    expect(dateChoice(formHtml, elsewhereId)).toContain('Holiday pantry');
+    expect(dateChoice(formHtml, elsewhereId)).toContain('Delivery');
+    expect(dateBox(formHtml, fullId)).toBe('');
+    expect(dateBox(formHtml, closedId)).toBe('');
+    expect(dateBox(formHtml, unpublishedId)).toBe('');
+
+    const token = issueFormToken('dev-only-change-me-not-for-production-use', {
+      shiftId,
+      issuedAt: NOW_MS - 10_000,
+      operationId: 'several-dates-0001',
+    });
+    const saved = await postSignup(
+      app,
+      shiftId,
+      { email: 'pat.dates@example.invalid', partySize: '2', dates: [shiftId, thirdId, otherHours, otherRole, elsewhereId] },
+      { token, ip: '203.0.113.201' },
+    );
+    expect(saved.status).toBe(303);
+    expect(locationOf(saved)).toBe(`/s/${shiftId}/confirmed`);
+    const confirmed = await app.request(locationOf(saved), { headers: { cookie: cookiePair(saved.headers.get('set-cookie') ?? '') } });
+    const confirmedHtml = await confirmed.text();
+    expect(confirmedHtml).toContain('Pat Review is signed up for 5 dates.');
+    expect(confirmedHtml).toContain('Each date holds 2 spots.');
+    expect(confirmedHtml).toContain('Thursday, October 15, 2026');
+    expect(confirmedHtml).toContain('Thursday, October 22, 2026');
+    expect(confirmedHtml).toContain('Thursday, October 29, 2026');
+    expect(confirmedHtml).toContain('dateTime="2026-10-22T16:00:00.000Z"');
+    expect(confirmedHtml).toContain('Intake');
+    expect(confirmedHtml).toContain('Delivery');
+    expect(confirmedHtml).toContain('A confirmation email is on the way for each date.');
+    const links = [...confirmedHtml.matchAll(/href="(\/m\/[^"]+)"/g)].map((match) => match[1]);
+    expect(links).toHaveLength(5);
+    expect((await app.request(links[0] ?? '/m/missing')).status).toBe(200);
+    expect((await app.request(links[4] ?? '/m/missing')).status).toBe(200);
+    expect(db.prepare(
+      `SELECT shift_id, group_size FROM signups WHERE email_norm = 'pat.dates@example.invalid' AND status = 'confirmed' ORDER BY shift_id`,
+    ).all()).toEqual([
+      { shift_id: shiftId, group_size: 2 },
+      { shift_id: thirdId, group_size: 2 },
+      { shift_id: otherHours, group_size: 2 },
+      { shift_id: otherRole, group_size: 2 },
+      { shift_id: elsewhereId, group_size: 2 },
+    ]);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM outbox WHERE kind = 'confirmation' AND to_email = 'pat.dates@example.invalid'").get()).toEqual({ n: 5 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM contacts WHERE email = ?').get('pat.dates@example.invalid')).toEqual({ n: 1 });
+
+    const replay = await postSignup(
+      app,
+      shiftId,
+      { email: 'pat.dates@example.invalid', partySize: '2', dates: [shiftId, thirdId, otherHours, otherRole, elsewhereId] },
+      { token, ip: '203.0.113.202' },
+    );
+    expect(replay.status).toBe(303);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM signups WHERE email_norm = 'pat.dates@example.invalid'").get()).toEqual({ n: 5 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM outbox WHERE kind = 'confirmation' AND to_email = 'pat.dates@example.invalid'").get()).toEqual({ n: 5 });
+
+    const none = await postSignup(app, shiftId, { email: 'nobody.dates@example.invalid', dates: [] }, { ip: '203.0.113.203' });
+    expect(none.status).toBe(303);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM signups WHERE email_norm = 'nobody.dates@example.invalid'").get()).toEqual({ n: 1 });
+    const foreign = await postSignup(
+      app,
+      shiftId,
+      { email: 'foreign.dates@example.invalid', dates: [shiftId, closedId, unpublishedId] },
+      { ip: '203.0.113.204' },
+    );
+    expect(foreign.status).toBe(400);
+    expect(await foreign.text()).toContain('Choose a date from the list.');
+    expect(db.prepare("SELECT COUNT(*) AS n FROM signups WHERE email_norm = 'foreign.dates@example.invalid'").get()).toEqual({ n: 0 });
+  });
+
+  it('keeps every date unsigned when one selected date cannot be saved', async () => {
+    const { app, db, shiftId } = await buildApp({ capacity: 4 });
+    const tightId = insertExtraShift(db, { capacity: 2, starts: '2026-10-22T14:00:00.000Z', ends: '2026-10-22T17:00:00.000Z' });
+    const taken = await postSignup(
+      app,
+      tightId,
+      { name: 'Pat Review', email: 'pat.taken@example.invalid' },
+      { ip: '203.0.113.211' },
+    );
+    expect(taken.status).toBe(303);
+    const duplicate = await postSignup(
+      app,
+      shiftId,
+      { name: 'Pat Review', email: 'pat.taken@example.invalid', dates: [shiftId, tightId] },
+      { ip: '203.0.113.212' },
+    );
+    expect(duplicate.status).toBe(409);
+    const duplicateHtml = await duplicate.text();
+    expect(duplicateHtml).toContain('You&#39;re already signed up for Sorting, Thursday, October 22, 2026, 9:00 AM to 12:00 PM');
+    expect(duplicateHtml).toContain('Leave that date unchecked.');
+    expect(duplicateHtml).not.toContain('/m/');
+    expect(db.prepare("SELECT COUNT(*) AS n FROM signups WHERE email_norm = 'pat.taken@example.invalid'").get()).toEqual({ n: 1 });
+
+    const crowded = await postSignup(
+      app,
+      shiftId,
+      { email: 'pat.crowd@example.invalid', partySize: '2', dates: [shiftId, tightId] },
+      { ip: '203.0.113.213' },
+    );
+    expect(crowded.status).toBe(409);
+    const crowdedHtml = await crowded.text();
+    expect(crowdedHtml).toContain('Sorting, Thursday, October 22, 2026, 9:00 AM to 12:00 PM');
+    expect(crowdedHtml).toContain('has 1 spot left.');
+    expect(db.prepare("SELECT COUNT(*) AS n FROM signups WHERE email_norm = 'pat.crowd@example.invalid'").get()).toEqual({ n: 0 });
+  });
+
+  it('counts one form as one signup attempt no matter how many dates it saves', async () => {
+    const { app, db, shiftId } = await buildApp({ capacity: 4 });
+    const extra = ['2026-10-22', '2026-10-29', '2026-11-05', '2026-11-12'].map((date) =>
+      insertExtraShift(db, { capacity: 4, starts: `${date}T14:00:00.000Z`, ends: `${date}T17:00:00.000Z` }),
+    );
+    const [firstDate, secondDate, thirdDate, fourthDate] = extra;
+    if (!firstDate || !secondDate || !thirdDate || !fourthDate) throw new Error('Expected four later shifts.');
+    const email = 'daily.dates@example.invalid';
+    expect((await postSignup(app, shiftId, { email, dates: [shiftId, firstDate] }, { ip: '203.0.113.221' })).status).toBe(303);
+    expect((await postSignup(app, secondDate, { email }, { ip: '203.0.113.222' })).status).toBe(303);
+    expect((await postSignup(app, thirdDate, { email }, { ip: '203.0.113.223' })).status).toBe(303);
+    expect((await postSignup(app, fourthDate, { email }, { ip: '203.0.113.224' })).status).toBe(429);
+    expect(SIGNUP_EMAIL_LIMIT).toBe(3);
+  });
 });
 
 describe('Turnstile siteverify', () => {
@@ -435,7 +616,7 @@ async function buildApp(options?: { capacity?: number; verify?: (input: unknown)
 
 function insertExtraShift(
   db: import('better-sqlite3').Database,
-  options?: { capacity?: number; starts?: string; ends?: string; cancelled?: number },
+  options?: { capacity?: number; starts?: string; ends?: string; cancelled?: number; role?: string },
 ): number {
   const event = db.prepare("SELECT id FROM events WHERE slug = 'weekly-pantry'").get() as { id: number } | undefined;
   const eventId = event?.id ?? Number(
@@ -447,15 +628,36 @@ function insertExtraShift(
   const result = db
     .prepare(
       `INSERT INTO shifts (event_id, role, starts_at_utc, ends_at_utc, capacity, notes, cancelled)
-       VALUES (?, 'Sorting', ?, ?, ?, '', ?)`,
+       VALUES (?, ?, ?, ?, ?, '', ?)`,
     )
     .run(
       eventId,
+      options?.role ?? 'Sorting',
       options?.starts ?? '2026-10-15T14:00:00.000Z',
       options?.ends ?? '2026-10-15T17:00:00.000Z',
       options?.capacity ?? 3,
       options?.cancelled ?? 0,
     );
+  return Number(result.lastInsertRowid);
+}
+
+function insertEventShift(
+  db: import('better-sqlite3').Database,
+  options: { slug: string; title: string; published: number; role: string; starts: string; ends: string },
+): number {
+  const existing = db.prepare('SELECT id AS id FROM events WHERE slug = ?').get(options.slug) as { id: number } | undefined;
+  const eventId = existing?.id ?? Number(
+    db.prepare(
+      `INSERT INTO events (slug, title, description, location, tz, published, created_at)
+       VALUES (?, ?, '', '', 'America/Chicago', ?, ?)`,
+    ).run(options.slug, options.title, options.published, NOW).lastInsertRowid,
+  );
+  const result = db
+    .prepare(
+      `INSERT INTO shifts (event_id, role, starts_at_utc, ends_at_utc, capacity, notes, cancelled)
+       VALUES (?, ?, ?, ?, 4, '', 0)`,
+    )
+    .run(eventId, options.role, options.starts, options.ends);
   return Number(result.lastInsertRowid);
 }
 
@@ -471,6 +673,7 @@ async function postSignup(
     notes: string;
     company: string;
     partySize: string;
+    dates: number[];
   }>,
   options?: { token?: string; issuedAt?: number; ip?: string; origin?: string; forwardedFor?: string; site?: string },
 ) {
@@ -493,6 +696,10 @@ async function postSignup(
     company_website: fields.company ?? '',
     'cf-turnstile-response': 'widget-token',
   });
+  if (fields.dates) {
+    body.append('dates_present', '1');
+    for (const id of fields.dates) body.append('dates', String(id));
+  }
   return app.request(`/s/${shiftId}`, {
     method: 'POST',
     headers: {
@@ -504,6 +711,21 @@ async function postSignup(
     },
     body,
   });
+}
+
+function dateBox(html: string, id: number): string {
+  const inputs = html.match(/<input\b[^>]*>/g) ?? [];
+  const value = new RegExp(`value="${id}"(?!\\d)`);
+  return inputs.find((input) => input.includes('name="dates"') && value.test(input)) ?? '';
+}
+
+function dateChoice(html: string, id: number): string {
+  const at = html.search(new RegExp(`name="dates" value="${id}"(?!\\d)`));
+  if (at === -1) return '';
+  const start = html.lastIndexOf('<li', at);
+  const end = html.indexOf('</li>', at);
+  if (start === -1 || end === -1) return '';
+  return html.slice(start, end);
 }
 
 function locationOf(response: Response): string {

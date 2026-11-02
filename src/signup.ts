@@ -5,7 +5,7 @@ import { rememberSignupContact } from './contacts.js';
 import { normalizeEmail } from './email.js';
 import { queueCancellation, queueConfirmation, queueCoordinatorNotices, cancelPendingConfirmations, cancelPendingReminders } from './mail/queue.js';
 import type { MailIdentity } from './mail/types.js';
-import { MAX_PARTY_SIZE } from './signup-form.js';
+import { MAX_PARTY_SIZE, MAX_SIGNUP_DATES } from './signup-form.js';
 import { isWithinSignupWindow } from './signup-window.js';
 import { formatInstantInZone, formatUtc, todayInZone, type ZonedClock } from './time.js';
 
@@ -78,6 +78,88 @@ export function findSignupByOperation(
   operationId: string,
 ): { id: number; shiftId: number; emailNorm: string } | null {
   return findOperation(db, sha256(operationId));
+}
+
+export type GroupedSignup = {
+  signupId: number;
+  shiftId: number;
+  manageToken: string | null;
+  replay: boolean;
+};
+
+export type ReserveGroupResult =
+  | { ok: true; signups: GroupedSignup[] }
+  | { ok: false; reason: 'not_found' | 'closed' | 'early' | 'full' | 'duplicate' | 'conflict'; shiftId: number };
+
+/**
+ * Reserves the same person on several shifts, or on none of them.
+ * A date that is full, closed, or already has this person rolls the whole form back.
+ * Repeating the same form reuses each date instead of taking another spot.
+ */
+export function reserveSignups(
+  db: Database.Database,
+  input: Omit<ReserveInput, 'shiftId'> & { shiftIds: number[] },
+): ReserveGroupResult {
+  const emailNorm = normalizeEmail(input.email);
+  const shiftIds = [...new Set(input.shiftIds)];
+  if (shiftIds.length === 0 || shiftIds.length > MAX_SIGNUP_DATES) {
+    return { ok: false, reason: 'conflict', shiftId: shiftIds[0] ?? 0 };
+  }
+  try {
+    return db
+      .transaction(() => {
+        const signups: GroupedSignup[] = [];
+        for (const shiftId of shiftIds) {
+          const reserved = placeReservation(db, { ...input, shiftId }, emailNorm, groupOperationKey(input.operationId, shiftId));
+          if (!reserved.ok) throw new GroupRollback({ ok: false, reason: reserved.reason, shiftId });
+          signups.push({
+            signupId: reserved.signupId,
+            shiftId,
+            manageToken: reserved.manageToken,
+            replay: reserved.replay,
+          });
+        }
+        return { ok: true as const, signups };
+      })
+      .immediate();
+  } catch (err) {
+    if (err instanceof GroupRollback) return err.failure;
+    if (!isUniqueConstraint(err)) throw err;
+    const signups: GroupedSignup[] = [];
+    for (const shiftId of shiftIds) {
+      const existing = findOperation(db, groupOperationKey(input.operationId, shiftId));
+      if (!existing || existing.shiftId !== shiftId || existing.emailNorm !== emailNorm) {
+        return { ok: false, reason: 'conflict', shiftId };
+      }
+      signups.push({ signupId: existing.id, shiftId, manageToken: null, replay: true });
+    }
+    return { ok: true, signups };
+  }
+}
+
+/** Signups already stored for this form, one per selected date. Null when any date is missing. */
+export function groupedOperationSignups(
+  db: Database.Database,
+  operationId: string,
+  shiftIds: number[],
+): Array<GroupedSignup & { emailNorm: string }> | null {
+  const signups: Array<GroupedSignup & { emailNorm: string }> = [];
+  for (const shiftId of shiftIds) {
+    const existing = findOperation(db, groupOperationKey(operationId, shiftId));
+    if (!existing || existing.shiftId !== shiftId) return null;
+    signups.push({ signupId: existing.id, shiftId, manageToken: null, replay: true, emailNorm: existing.emailNorm });
+  }
+  return signups;
+}
+
+function groupOperationKey(operationId: string, shiftId: number): string {
+  return sha256(`${operationId}\0${shiftId}`);
+}
+
+class GroupRollback extends Error {
+  constructor(readonly failure: Extract<ReserveGroupResult, { ok: false }>) {
+    super('Signup dates rolled back');
+  }
 }
 
 export function confirmedOperationShift(db: Database.Database, operationId: string): number | null {

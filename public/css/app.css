@@ -665,6 +665,33 @@ main a:hover {
   text-decoration: none;
 }
 
+.receipt-dates {
+  display: grid;
+  margin: 0;
+  padding: 0.35rem 0 0;
+  list-style: none;
+}
+
+.receipt-dates > li {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.85rem 1.25rem 0.35rem;
+}
+
+.receipt-dates > li + li {
+  margin-top: 0.35rem;
+  border-top: 1px solid var(--hope-border);
+}
+
+.receipt-dates .receipt-link {
+  margin-top: 0.2rem;
+  border-radius: 1rem;
+}
+
+.receipt-dates + .receipt-note {
+  padding: 0.35rem 1.25rem 1.2rem;
+}
+
 .manage {
   display: grid;
   gap: 0.35rem 0;
@@ -1888,6 +1915,125 @@ article.shift-card {
 
 .signup-form legend {
   padding: 0 0.35rem;
+}
+
+.signup-form .more-dates {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.signup-form .more-dates > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 48px;
+  padding: 0.7rem 1rem;
+  list-style: none;
+  cursor: pointer;
+  background: var(--hope-blue-50);
+  border-radius: 999px;
+  box-shadow: var(--hope-shadow);
+  font-weight: 650;
+}
+
+.signup-form .more-dates > summary::-webkit-details-marker {
+  display: none;
+}
+
+.signup-form .more-dates > summary::marker {
+  content: "";
+}
+
+.signup-form .more-dates > summary::after {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-left: auto;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-0.12rem) rotate(45deg);
+  flex: none;
+}
+
+.signup-form .more-dates[open] > summary {
+  border-radius: 1.25rem 1.25rem 0 0;
+}
+
+.signup-form .more-dates[open] > summary::after {
+  transform: translateY(0.12rem) rotate(225deg);
+}
+
+.signup-form .more-dates-count {
+  color: var(--hope-ink-2);
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+
+.signup-form .more-dates-count[hidden] {
+  display: none;
+}
+
+.signup-form .more-dates-panel {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.75rem 0.85rem 0.9rem;
+  background: var(--hope-blue-50);
+  border-radius: 0 0 1.25rem 1.25rem;
+  box-shadow: var(--hope-shadow);
+}
+
+.signup-form .more-dates-panel .signup-note {
+  font-weight: 500;
+}
+
+.signup-form .date-choices {
+  display: grid;
+  gap: 0.15rem;
+  max-height: 16.5rem;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.signup-form .date-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0.4rem 0.15rem;
+  font-weight: 650;
+}
+
+.signup-form .date-choice input {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.2rem;
+  accent-color: var(--hope-gold);
+  flex: none;
+}
+
+.signup-form .date-choice time,
+.signup-form .date-choice-role,
+.signup-form .date-choice-event,
+.signup-form .date-choice-clock {
+  display: block;
+}
+
+.signup-form .date-choice-clock {
+  margin-top: 0.1rem;
+  color: var(--hope-ink-2);
+  font-weight: 500;
+}
+
+.signup-form .date-choice-spots {
+  display: block;
+  margin-top: 0.1rem;
+  color: var(--hope-ink-2);
+  font-size: 0.92rem;
+  font-weight: 500;
 }
 
 .signup-form input,

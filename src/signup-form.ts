@@ -9,6 +9,9 @@ const NOTES_MAX = 500;
 /** One signup can hold this many spots. The database check uses the same bound. */
 export const MAX_PARTY_SIZE = 20;
 
+/** One form can reserve this many dates. Each date is still its own signup. */
+export const MAX_SIGNUP_DATES = 24;
+
 export type SignupValues = {
   name: string;
   firstName: string;
@@ -20,7 +23,7 @@ export type SignupValues = {
 };
 
 export type SignupErrors = Partial<
-  Record<'name' | 'firstName' | 'lastName' | 'email' | 'phone' | 'notes' | 'partySize' | 'form', string>
+  Record<'name' | 'firstName' | 'lastName' | 'email' | 'phone' | 'notes' | 'partySize' | 'dates' | 'form', string>
 >;
 
 export type SignupDraft = {

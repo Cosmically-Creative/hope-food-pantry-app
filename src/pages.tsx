@@ -1,7 +1,7 @@
 import type { Child } from 'hono/jsx';
 import type { AppConfig } from './config.js';
 import { WEEKDAY_SHORT, calendarMonth, calendarToday, chooseCalendarMonth, monthStep, type CalendarDay } from './calendar.js';
-import { spotsSentence, type PublicEvent, type PublicShift } from './schedule.js';
+import { spotsSentence, type PublicEvent, type PublicShift, type SignupDateChoice } from './schedule.js';
 import { SIGNUP_TOO_EARLY, signupDeadlineLabel } from './signup-window.js';
 import { partyChoiceLabel, partyChoices, type SignupErrors, type SignupValues } from './signup-form.js';
 import type { MoveTarget } from './admin/store.js';
@@ -298,6 +298,8 @@ export type SignupFormView = {
   siteKey: string;
   values: SignupValues;
   errors: SignupErrors;
+  dates: SignupDateChoice[];
+  selectedDateIds: number[];
 };
 
 export function ShiftPage(props: {
@@ -320,11 +322,16 @@ export function ShiftPage(props: {
         </p>
       ) : null}
       {props.signup ? (
-        <SignupForm config={props.config} shiftId={props.shift.id} remaining={props.shift.remaining} form={props.signup} />
+        <SignupForm config={props.config} shiftId={props.shift.id} eventId={props.shift.event.id} remaining={props.shift.remaining} form={props.signup} />
       ) : null}
     </>
   );
 }
+
+export type ConfirmationEntry = {
+  shift: PublicShift;
+  managePath: string | null;
+};
 
 export function ConfirmationPage(props: {
   config: AppConfig;
@@ -333,7 +340,23 @@ export function ConfirmationPage(props: {
   managePath: string | null;
   groupSize?: number;
   cancelled?: boolean;
+  also?: ConfirmationEntry[];
 }) {
+  const also = props.also ?? [];
+  if (also.length > 0 && !props.cancelled) {
+    const entries = [{ shift: props.shift, managePath: props.managePath }, ...also].sort((left, right) => {
+      const byTime = left.shift.startsAtUtc.localeCompare(right.shift.startsAtUtc);
+      return byTime === 0 ? left.shift.id - right.shift.id : byTime;
+    });
+    return (
+      <SeveralDatesReceipt
+        config={props.config}
+        name={props.name}
+        groupSize={props.groupSize ?? 1}
+        entries={entries}
+      />
+    );
+  }
   const shift = props.shift;
   const cancelled = Boolean(props.cancelled);
   const summary = cancelled
@@ -382,6 +405,57 @@ export function ConfirmationPage(props: {
         {props.managePath ? (
           <a class="receipt-link" href={props.managePath}>{`${props.config.baseUrl}${props.managePath}`}</a>
         ) : null}
+      </section>
+    </article>
+  );
+}
+
+function SeveralDatesReceipt(props: {
+  config: AppConfig;
+  name: string | null;
+  groupSize: number;
+  entries: ConfirmationEntry[];
+}) {
+  const count = props.entries.length;
+  const summary = props.name
+    ? `${props.name} is signed up for ${count} dates.`
+    : `These ${count} dates are saved.`;
+  return (
+    <article class="receipt">
+      <header class="receipt-head">
+        <span class="receipt-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M5 12.5 9.2 16.7 19 7" />
+          </svg>
+        </span>
+        <div>
+          <h1>You're signed up</h1>
+          <p class="receipt-summary">{summary}</p>
+          {props.groupSize > 1 ? (
+            <p class="spots is-open">Each date holds {props.groupSize} spots.</p>
+          ) : null}
+        </div>
+      </header>
+      <section class="receipt-card">
+        <h2 class="receipt-banner">Shift information</h2>
+        <ul class="receipt-dates">
+          {props.entries.map((entry) => {
+            const location = entry.shift.event.location.trim();
+            return (
+              <li key={entry.shift.id}>
+                <p class="receipt-role">{entry.shift.role}</p>
+                <ShiftWhen shift={entry.shift} />
+                {location ? <p class="receipt-where">{location}</p> : null}
+                {entry.managePath ? (
+                  <a class="receipt-link" href={entry.managePath}>{`${props.config.baseUrl}${entry.managePath}`}</a>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+        <p class="receipt-note">
+          A confirmation email is on the way for each date. This browser keeps the links above for a few minutes. Use a link to cancel that date or switch it.
+        </p>
       </section>
     </article>
   );
@@ -1148,12 +1222,24 @@ function Spots(props: { shift: PublicShift }) {
   return <p class={props.shift.full ? 'spots is-full' : 'spots is-open'}>{spotsSentence(props.shift)}</p>;
 }
 
-function SignupForm(props: { config: AppConfig; shiftId: number; remaining: number; form: SignupFormView }) {
+function SignupForm(props: { config: AppConfig; shiftId: number; eventId: number; remaining: number; form: SignupFormView }) {
   const form = props.form;
   const errors = form.errors;
   const errorEntries = Object.entries(errors).filter((entry): entry is [string, string] => Boolean(entry[1]));
+  const selected = new Set(form.selectedDateIds);
+  const chosen = form.dates.filter((date) => selected.has(date.id));
+  const selectedRoom = chosen.length > 0 ? Math.min(...chosen.map((date) => date.remaining)) : props.remaining;
+  const choiceRoom = form.dates.length > 0 ? Math.max(selectedRoom, ...form.dates.map((date) => date.remaining)) : props.remaining;
+  const moreDates = form.dates.filter((date) => date.id !== props.shiftId);
+  const severalDates = moreDates.length > 0;
+  const extraCount = moreDates.filter((date) => selected.has(date.id)).length;
   return (
-    <form class="signup-form" method="post" action={appPath(props.config, `/s/${props.shiftId}`)}>
+    <form
+      class="signup-form"
+      method="post"
+      action={appPath(props.config, `/s/${props.shiftId}`)}
+      data-page-remaining={severalDates ? String(props.remaining) : undefined}
+    >
       <h2>Sign up</h2>
       <div class="signup-lead">
         <p>Choose how many people are coming, including you. This signup holds that many spots under your name. Another person can use the same email address.</p>
@@ -1203,7 +1289,18 @@ function SignupForm(props: { config: AppConfig; shiftId: number; remaining: numb
           required
         />
       </div>
-      <PartySizeField idPrefix="signup" value={form.values.partySize} error={errors.partySize} remaining={props.remaining} />
+      <PartySizeField
+        idPrefix="signup"
+        value={form.values.partySize}
+        error={errors.partySize}
+        remaining={severalDates ? choiceRoom : props.remaining}
+        limit={severalDates ? selectedRoom : undefined}
+        hint={
+          severalDates
+            ? "Including you. This number applies to the date you opened and every date you add. You don't need to add their names."
+            : undefined
+        }
+      />
       <Field id="signup-email" label="Email" name="email" type="email" value={form.values.email} error={errors.email} autoComplete="email" />
       <Field
         id="signup-phone"
@@ -1226,14 +1323,72 @@ function SignupForm(props: { config: AppConfig; shiftId: number; remaining: numb
           </span>
         ) : null}
       </label>
+      {severalDates ? (
+        <MoreDates dates={moreDates} eventId={props.eventId} selected={selected} count={extraCount} error={errors.dates} />
+      ) : null}
       <div class="cf-turnstile" data-sitekey={form.siteKey} data-action="signup" />
       <p class="signup-note" id="signup-turnstile-hint">This check confirms the signup came from a browser.</p>
-      <button type="submit">Sign up</button>
+      <button type="submit">{extraCount > 0 ? `Sign up for ${extraCount + 1} dates` : 'Sign up'}</button>
     </form>
   );
 }
 
-export function PartySizeField(props: { idPrefix: string; value: string; error?: string; remaining: number }) {
+function MoreDates(props: { dates: SignupDateChoice[]; eventId: number; selected: Set<number>; count: number; error?: string }) {
+  const open = Boolean(props.error) || props.count > 0;
+  return (
+    <details class="more-dates" id="signup-dates" open={open ? true : undefined} aria-invalid={props.error ? 'true' : undefined} aria-describedby={props.error ? 'signup-dates-error' : undefined}>
+      <summary>
+        <span data-more-dates-label>More Dates?</span>
+        <span class="more-dates-count" data-more-dates-count hidden={props.count > 0 ? undefined : true}>
+          {props.count === 1 ? '1 selected' : props.count > 1 ? `${props.count} selected` : ''}
+        </span>
+      </summary>
+      <div class="more-dates-panel">
+        <p class="signup-note">The shift you opened is already included. You can add any open shift. Each one is its own signup, with the same name and number of people.</p>
+        <ul class="date-choices">
+          {props.dates.map((date) => {
+            const checked = props.selected.has(date.id);
+            const spots = date.remaining === 1 ? '1 spot left' : `${date.remaining} spots left`;
+            return (
+              <li key={date.id}>
+                <label class="date-choice">
+                  <input type="checkbox" name="dates" value={String(date.id)} checked={checked ? true : undefined} data-remaining={String(date.remaining)} />
+                  <span>
+                    {date.eventId === props.eventId ? null : <span class="date-choice-event">{date.eventTitle}</span>}
+                    <span class="date-choice-role">{date.role}</span>
+                    <time dateTime={date.date}>{date.dateLabel}</time>
+                    <span class="date-choice-clock">{dateClock(date)}</span>
+                    <span class="date-choice-spots">{spots}</span>
+                  </span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+      {props.error ? (
+        <span class="field-error" id="signup-dates-error">
+          {props.error}
+        </span>
+      ) : null}
+    </details>
+  );
+}
+
+function dateClock(date: SignupDateChoice): string {
+  const endDate = date.sameDay ? '' : `${date.endDateLabel} `;
+  return `${date.startLabel} to ${endDate}${date.endLabel} ${date.abbreviation}`;
+}
+
+export function PartySizeField(props: {
+  idPrefix: string;
+  value: string;
+  error?: string;
+  remaining: number;
+  /** Options above this stay visible and disabled. Omitted means every listed choice can be selected. */
+  limit?: number;
+  hint?: string;
+}) {
   const id = `${props.idPrefix}-partySize`;
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
@@ -1247,13 +1402,18 @@ export function PartySizeField(props: { idPrefix: string; value: string; error?:
         aria-describedby={props.error ? `${hintId} ${errorId}` : hintId}
       >
         {partyChoices(props.remaining).map((count) => (
-          <option key={count} value={String(count)} selected={props.value === String(count) ? true : undefined}>
+          <option
+            key={count}
+            value={String(count)}
+            selected={props.value === String(count) ? true : undefined}
+            disabled={props.limit !== undefined && count > props.limit ? true : undefined}
+          >
             {partyChoiceLabel(count)}
           </option>
         ))}
       </select>
       <span class="hint" id={hintId}>
-        Including you. This signup holds that many spots. You don't need to add their names.
+        {props.hint ?? "Including you. This signup holds that many spots. You don't need to add their names."}
       </span>
       {props.error ? (
         <span class="field-error" id={errorId}>

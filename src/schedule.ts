@@ -160,6 +160,78 @@ export function getPublicShift(db: Database.Database, id: number, now: string): 
   return presentShift(row, now, names.get(row.id) ?? []);
 }
 
+export type SignupDateChoice = {
+  id: number;
+  role: string;
+  eventId: number;
+  eventTitle: string;
+  date: string;
+  dateLabel: string;
+  startLabel: string;
+  endLabel: string;
+  endDateLabel: string;
+  sameDay: boolean;
+  abbreviation: string;
+  remaining: number;
+};
+
+/**
+ * Open shifts a volunteer can still join, on any published event.
+ * The shift they opened is included. Full, ended, cancelled, and not-yet-open shifts are left out.
+ */
+export function listSignupDates(db: Database.Database, shift: PublicShift, now: string): SignupDateChoice[] {
+  return listSignupChoices(db, shift, now, false);
+}
+
+/** Shifts the form may accept, including one that filled after the form was shown. */
+export function listSignupSlot(db: Database.Database, shift: PublicShift, now: string): SignupDateChoice[] {
+  return listSignupChoices(db, shift, now, true);
+}
+
+function listSignupChoices(db: Database.Database, shift: PublicShift, now: string, includeFull: boolean): SignupDateChoice[] {
+  const rows = db
+    .prepare(
+      `SELECT ${SHIFT_COLUMNS}
+       ${SHIFT_FROM}
+       WHERE e.published = 1 AND s.cancelled = 0 AND s.ends_at_utc > ?
+       GROUP BY s.id
+       ORDER BY s.starts_at_utc, s.role COLLATE NOCASE, s.id`,
+    )
+    .all(now) as ShiftRow[];
+  const choices: SignupDateChoice[] = [];
+  for (const row of rows) {
+    const candidate = presentShift(row, now, []);
+    if (candidate.ended || candidate.cancelled || candidate.tooEarly) continue;
+    if (!includeFull && candidate.full) continue;
+    choices.push(dateChoice(candidate));
+  }
+  if (!choices.some((choice) => choice.id === shift.id) && (includeFull || openForSignup(shift))) {
+    choices.unshift(dateChoice(shift));
+  }
+  return choices;
+}
+
+function openForSignup(shift: PublicShift): boolean {
+  return !shift.ended && !shift.full && !shift.cancelled && !shift.tooEarly;
+}
+
+function dateChoice(shift: PublicShift): SignupDateChoice {
+  return {
+    id: shift.id,
+    role: shift.role,
+    eventId: shift.event.id,
+    eventTitle: shift.event.title,
+    date: shift.when.date,
+    dateLabel: shift.when.dateLabel,
+    startLabel: shift.when.startLabel,
+    endLabel: shift.when.endLabel,
+    endDateLabel: shift.when.endDateLabel,
+    sameDay: shift.when.sameDay,
+    abbreviation: shift.when.abbreviation,
+    remaining: shift.remaining,
+  };
+}
+
 export function spotsSentence(shift: Pick<PublicShift, 'occupied' | 'capacity'>): string {
   const filled = Math.min(shift.capacity, Math.max(0, shift.occupied));
   return `${filled}/${shift.capacity} spots filled`;

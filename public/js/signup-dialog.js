@@ -177,7 +177,9 @@
           form.removeAttribute('data-sending');
           if (submit) {
             submit.disabled = false;
-            submit.textContent = 'Sign up';
+            var chosen = form.querySelectorAll('input[name="dates"]:checked').length;
+            var total = form.hasAttribute('data-page-remaining') ? chosen + 1 : chosen;
+            submit.textContent = total > 1 ? 'Sign up for ' + total + ' dates' : 'Sign up';
           }
           var alert = form.querySelector('[data-signup-send-error]');
           if (!alert) {

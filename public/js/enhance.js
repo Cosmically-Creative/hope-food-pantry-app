@@ -3,6 +3,7 @@
   bindCalendar();
   bindViewMenu();
   bindManage();
+  bindSignupDates();
   document.querySelectorAll('[data-contact]').forEach(bindContact);
   document.querySelectorAll('[data-see-more]').forEach(bindSeeMore);
 
@@ -115,6 +116,52 @@
         else link.hidden = true;
       }
     });
+  }
+
+  function bindSignupDates() {
+    document.addEventListener('click', function (event) {
+      var openMenus = document.querySelectorAll('details.more-dates[open]');
+      for (var j = 0; j < openMenus.length; j += 1) {
+        if (!openMenus[j].contains(event.target)) openMenus[j].open = false;
+      }
+    });
+    document.addEventListener('change', function (event) {
+      var box = event.target;
+      if (!box || box.name !== 'dates' || !box.form) return;
+      syncSignupDates(box.form);
+    });
+  }
+
+  function syncSignupDates(form) {
+    var boxes = form.querySelectorAll('input[name="dates"]');
+    if (!boxes.length) return;
+    var pageRoom = Number(form.getAttribute('data-page-remaining'));
+    var min = pageRoom > 0 ? pageRoom : Infinity;
+    var checked = 0;
+    for (var i = 0; i < boxes.length; i += 1) {
+      if (!boxes[i].checked) continue;
+      checked += 1;
+      var room = Number(boxes[i].getAttribute('data-remaining'));
+      if (room > 0 && room < min) min = room;
+    }
+    var select = form.querySelector('select[name="party_size"]');
+    if (select && min < Infinity) {
+      for (var j = 0; j < select.options.length; j += 1) {
+        var option = select.options[j];
+        option.disabled = Number(option.value) > min;
+      }
+      if (select.selectedOptions.length && select.selectedOptions[0].disabled) select.value = String(min);
+    }
+    var count = form.querySelector('[data-more-dates-count]');
+    if (count) {
+      count.hidden = checked === 0;
+      count.textContent = checked === 1 ? '1 selected' : checked + ' selected';
+    }
+    var button = form.querySelector('button[type="submit"]');
+    if (button && form.getAttribute('data-sending') !== 'true') {
+      var total = pageRoom > 0 ? checked + 1 : checked;
+      button.textContent = total > 1 ? 'Sign up for ' + total + ' dates' : 'Sign up';
+    }
   }
 
   function bindContact(picker) {

@@ -8,7 +8,7 @@ import { listMoveTargets, switchSignup } from './admin/store.js';
 import { readSession } from './auth/session.js';
 import { cancelTokenMatches, issueCancelToken, issuePartyToken, issueReminderPageToken, issueSwitchToken, partyTokenMatches, reminderPageTokenMatches, switchTokenMatches } from './cancel-token.js';
 import { clientAddress } from './client-ip.js';
-import { confirmationCookie, openConfirmation, sealConfirmation } from './confirm-cookie.js';
+import { confirmationCookie, openConfirmation, sealConfirmation, type ConfirmationCompanion } from './confirm-cookie.js';
 import type { AppConfig } from './config.js';
 import { issueFormToken, newOperationId, openFormToken, readFormToken } from './form-token.js';
 import { originAllowed } from './origin.js';
@@ -26,12 +26,12 @@ import {
   type SwitchForm,
 } from './pages.js';
 import { recordInvalidManageToken, recordSignupEmail, recordSignupIp, recordSwitchAttempt } from './rate-limit.js';
-import { getPublicShift, type PublicShift } from './schedule.js';
+import { getPublicShift, listSignupDates, listSignupSlot, type PublicShift, type SignupDateChoice } from './schedule.js';
 import { SIGNUP_TOO_EARLY } from './signup-window.js';
-import { EMPTY_SIGNUP, parsePartySize, parseSignupForm, spotsLeftMessage, type SignupErrors, type SignupValues } from './signup-form.js';
+import { EMPTY_SIGNUP, MAX_SIGNUP_DATES, parsePartySize, parseSignupForm, spotsLeftMessage, type SignupErrors, type SignupValues } from './signup-form.js';
 import type { MailIdentity } from './mail/types.js';
 import { disableReminders, enableReminders, queueDueReminders } from './reminders.js';
-import { cancelSignup, changePartySize, confirmedOperationShift, findSignupByOperation, managePartyLimit, readManageSignup, reserveSignup } from './signup.js';
+import { cancelSignup, changePartySize, confirmedOperationShift, findSignupByOperation, groupedOperationSignups, managePartyLimit, readManageSignup, reserveSignup, reserveSignups } from './signup.js';
 import { verifyTurnstile, type TurnstileCheck, type TurnstileVerdict } from './turnstile.js';
 import { appPath, cookiePath } from './url.js';
 
@@ -87,6 +87,7 @@ export function registerPublicSignup(app: Hono, services: SignupServices): void 
     const manage = seal && seal.shiftId === shift.id ? readManageSignup(services.db, seal.token, services.now()) : null;
     const matches = Boolean(manage && seal && manage.signupId === seal.signupId);
     const cancelled = matches && manage?.status === 'cancelled';
+    const also = matches && seal && !cancelled ? confirmedCompanions(services, seal) : [];
     return html(
       c,
       services,
@@ -98,6 +99,7 @@ export function registerPublicSignup(app: Hono, services: SignupServices): void 
         managePath={matches && seal ? appPath(config, `/m/${seal.token}`) : null}
         groupSize={matches && manage ? manage.groupSize : undefined}
         cancelled={cancelled}
+        also={also}
       />,
     );
   });
@@ -124,7 +126,7 @@ async function submitSignup(c: Context, services: SignupServices): Promise<Respo
   if (ipLimit.limited) {
     return shiftResponse(c, services, shift, 429, blankForm(services, shift), TOO_MANY, ipLimit.retryAfter);
   }
-  const body = await c.req.parseBody();
+  const body = await c.req.parseBody({ all: true });
   const values = valuesFrom(body);
   if (textField(body, 'company_website').trim() !== '') {
     return shiftResponse(c, services, shift, 409, formFor(services, shift, values, {}, null), COULD_NOT_SAVE);
@@ -135,16 +137,26 @@ async function submitSignup(c: Context, services: SignupServices): Promise<Respo
     const token = tokenResult.reason === 'too_fast' ? textField(body, 'form_token') : null;
     return shiftResponse(c, services, shift, 400, formFor(services, shift, values, {}, token), notice);
   }
+  const selection = readDateSelection(body, shift.id, listSignupSlot(db, shift, now));
   const parsed = parseSignupForm(values);
-  if (!parsed.ok) {
-    return shiftResponse(c, services, shift, 400, formFor(services, shift, values, parsed.errors, textField(body, 'form_token')), undefined);
+  if (!parsed.ok || !selection.ok) {
+    const errors: SignupErrors = parsed.ok ? {} : parsed.errors;
+    if (!selection.ok) errors.dates = selection.error;
+    return shiftResponse(
+      c,
+      services,
+      shift,
+      400,
+      formFor(services, shift, values, errors, textField(body, 'form_token'), selection.shiftIds),
+    );
   }
+  const several = selection.shiftIds.length > 1 || selection.shiftIds[0] !== shift.id;
   const existing = findSignupByOperation(db, tokenResult.claims.operationId);
-  if (existing && existing.shiftId === shift.id && existing.emailNorm === parsed.draft.emailNorm) {
+  if (!several && existing && existing.shiftId === shift.id && existing.emailNorm === parsed.draft.emailNorm) {
     return redirectConfirmed(c, services, shift.id, null);
   }
   if (existing) {
-    return shiftResponse(c, services, shift, 409, formFor(services, shift, values, {}, null), COULD_NOT_SAVE);
+    return shiftResponse(c, services, shift, 409, formFor(services, shift, values, {}, null, selection.shiftIds), COULD_NOT_SAVE);
   }
   const turnstileToken = textField(body, 'cf-turnstile-response').trim();
   const verdict = turnstileToken === ''
@@ -152,17 +164,67 @@ async function submitSignup(c: Context, services: SignupServices): Promise<Respo
     : await checkTurnstile(services, turnstileToken, ip);
   if (!verdict.ok) {
     if (verdict.reason === 'duplicate') {
-      const again = findSignupByOperation(db, tokenResult.claims.operationId);
-      if (again && again.shiftId === shift.id && again.emailNorm === parsed.draft.emailNorm) {
-        return redirectConfirmed(c, services, shift.id, null);
+      if (!several) {
+        const again = findSignupByOperation(db, tokenResult.claims.operationId);
+        if (again && again.shiftId === shift.id && again.emailNorm === parsed.draft.emailNorm) {
+          return redirectConfirmed(c, services, shift.id, null);
+        }
+      } else {
+        const again = groupedOperationSignups(db, tokenResult.claims.operationId, selection.shiftIds);
+        if (again?.every((row) => row.emailNorm === parsed.draft.emailNorm)) {
+          return redirectGrouped(c, services, shift.id, again);
+        }
       }
     }
     const notice = verdict.reason === 'unavailable' ? CHECK_UNAVAILABLE : CHECK_AGAIN;
-    return shiftResponse(c, services, shift, verdict.reason === 'unavailable' ? 503 : 400, formFor(services, shift, values, {}, textField(body, 'form_token')), notice);
+    return shiftResponse(
+      c,
+      services,
+      shift,
+      verdict.reason === 'unavailable' ? 503 : 400,
+      formFor(services, shift, values, {}, textField(body, 'form_token'), selection.shiftIds),
+      notice,
+    );
   }
   const emailLimit = recordSignupEmail(db, config.sessionSecret, now, config.defaultTimeZone, parsed.draft.emailNorm);
   if (emailLimit.limited) {
-    return shiftResponse(c, services, shift, 429, formFor(services, shift, values, {}, textField(body, 'form_token')), TOO_MANY, emailLimit.retryAfter);
+    return shiftResponse(
+      c,
+      services,
+      shift,
+      429,
+      formFor(services, shift, values, {}, textField(body, 'form_token'), selection.shiftIds),
+      TOO_MANY,
+      emailLimit.retryAfter,
+    );
+  }
+  if (several) {
+    try {
+      const reserved = reserveSignups(db, {
+        shiftIds: selection.shiftIds,
+        name: parsed.draft.name,
+        email: parsed.draft.emailNorm,
+        phone: parsed.draft.phone,
+        notes: parsed.draft.notes,
+        groupSize: parsed.draft.groupSize,
+        operationId: tokenResult.claims.operationId,
+        now,
+        mail: mailIdentity(db, config),
+      });
+      if (reserved.ok) return redirectGrouped(c, services, shift.id, reserved.signups);
+      return groupFailure(c, services, shift, values, textField(body, 'form_token'), selection.shiftIds, reserved.reason, reserved.shiftId);
+    } catch (err) {
+      if (!isBusy(err)) throw err;
+      console.error('Signup could not lock the database.');
+      return shiftResponse(
+        c,
+        services,
+        shift,
+        503,
+        formFor(services, shift, values, {}, textField(body, 'form_token'), selection.shiftIds),
+        CHECK_UNAVAILABLE,
+      );
+    }
   }
   try {
     const reserved = reserveSignup(db, {
@@ -208,7 +270,7 @@ function redirectConfirmed(
   c: Context,
   services: SignupServices,
   shiftId: number,
-  issued: { signupId: number; token: string } | null,
+  issued: { signupId: number; token: string; companions?: ConfirmationCompanion[] } | null,
 ): Response {
   if (issued) {
     const sealed = sealConfirmation(services.config.sessionSecret, {
@@ -216,11 +278,112 @@ function redirectConfirmed(
       shiftId,
       token: issued.token,
       expiresAtMs: epochMs(services.now()) + 900 * 1000,
+      companions: issued.companions,
     });
     c.header('Set-Cookie', confirmationCookie(sealed, cookiePath(services.config), services.config.secureCookies));
   }
   c.header('Cache-Control', 'no-store');
   return c.redirect(appPath(services.config, `/s/${shiftId}/confirmed`), 303);
+}
+
+function redirectGrouped(
+  c: Context,
+  services: SignupServices,
+  pageShiftId: number,
+  signups: Array<{ signupId: number; shiftId: number; manageToken: string | null }>,
+): Response {
+  const primary = signups.find((row) => row.shiftId === pageShiftId) ?? signups[0];
+  if (!primary) return html(c, services, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
+  const issued = signups.every((row) => row.manageToken)
+    ? {
+        signupId: primary.signupId,
+        token: primary.manageToken ?? '',
+        companions: signups
+          .filter((row) => row.shiftId !== primary.shiftId && row.manageToken)
+          .map((row) => ({ signupId: row.signupId, shiftId: row.shiftId, token: row.manageToken ?? '' })),
+      }
+    : null;
+  return redirectConfirmed(c, services, primary.shiftId, issued);
+}
+
+function groupFailure(
+  c: Context,
+  services: SignupServices,
+  shift: PublicShift,
+  values: SignupValues,
+  token: string,
+  selectedDateIds: number[],
+  reason: 'not_found' | 'closed' | 'early' | 'full' | 'duplicate' | 'conflict',
+  shiftId: number,
+): Response {
+  const failed = getPublicShift(services.db, shiftId, services.now());
+  const label = failed ? shiftChoiceLabel(failed, shift) : undefined;
+  const errors: SignupErrors = {};
+  let notice: string | undefined;
+  if (!failed || !label || reason === 'conflict') notice = COULD_NOT_SAVE;
+  else if (reason === 'not_found') errors.dates = 'Choose a date from the list.';
+  else if (reason === 'duplicate') errors.dates = `You're already signed up for ${label}. Leave that date unchecked.`;
+  else if (reason === 'closed') errors.dates = `${label} is closed. Leave that date unchecked.`;
+  else if (reason === 'early') errors.dates = `${label} is not open for signup yet. Leave that date unchecked.`;
+  else if (reason === 'full' && failed.remaining > 0) {
+    const spots = failed.remaining === 1 ? '1 spot left' : `${failed.remaining} spots left`;
+    errors.dates = `${label} has ${spots}. Choose fewer people or leave that date unchecked.`;
+  } else if (reason === 'full') errors.dates = `${label} is full. Leave that date unchecked.`;
+  else notice = COULD_NOT_SAVE;
+  return shiftResponse(
+    c,
+    services,
+    loadShift(services, String(shift.id)) ?? shift,
+    409,
+    formFor(services, shift, values, errors, token, selectedDateIds),
+    notice,
+  );
+}
+
+function confirmedCompanions(
+  services: SignupServices,
+  seal: { companions?: ConfirmationCompanion[] },
+): Array<{ shift: PublicShift; managePath: string | null }> {
+  const views: Array<{ shift: PublicShift; managePath: string | null }> = [];
+  for (const companion of seal.companions ?? []) {
+    const shift = getPublicShift(services.db, companion.shiftId, services.now());
+    const manage = readManageSignup(services.db, companion.token, services.now());
+    if (!shift || !manage) continue;
+    if (manage.signupId !== companion.signupId || manage.shiftId !== shift.id || manage.status !== 'confirmed') continue;
+    views.push({ shift, managePath: appPath(services.config, `/m/${companion.token}`) });
+  }
+  return views;
+}
+
+function shiftChoiceLabel(shift: PublicShift, page: PublicShift): string {
+  const endDate = shift.when.sameDay ? '' : `${shift.when.endDateLabel} `;
+  const event = shift.event.id === page.event.id ? '' : `${shift.event.title}, `;
+  return `${event}${shift.role}, ${shift.when.dateLabel}, ${shift.when.startLabel} to ${endDate}${shift.when.endLabel} ${shift.when.abbreviation}`;
+}
+
+type DateSelection = { ok: true; shiftIds: number[] } | { ok: false; error: string; shiftIds: number[] };
+
+function readDateSelection(body: Record<string, unknown>, pageShiftId: number, choices: SignupDateChoice[]): DateSelection {
+  const raw = body.dates;
+  const asked = raw !== undefined || textField(body, 'dates_present') === '1';
+  if (!asked) return { ok: true, shiftIds: [pageShiftId] };
+  const allowed = new Set(choices.map((choice) => choice.id));
+  const values = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
+  const picked: number[] = [];
+  for (const value of values) {
+    if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
+      return { ok: false, error: 'Choose a date from the list.', shiftIds: picked };
+    }
+    const id = Number(value);
+    if (!allowed.has(id)) return { ok: false, error: 'Choose a date from the list.', shiftIds: picked };
+    if (!picked.includes(id)) picked.push(id);
+  }
+  if (allowed.has(pageShiftId) && !picked.includes(pageShiftId)) picked.unshift(pageShiftId);
+  if (picked.length === 0) return { ok: false, error: 'Choose at least one date.', shiftIds: [] };
+  if (picked.length > MAX_SIGNUP_DATES) {
+    return { ok: false, error: `Choose ${MAX_SIGNUP_DATES} dates or fewer.`, shiftIds: picked.slice(0, MAX_SIGNUP_DATES) };
+  }
+  return { ok: true, shiftIds: choices.filter((choice) => picked.includes(choice.id)).map((choice) => choice.id) };
 }
 
 function shiftResponse(
@@ -256,7 +419,11 @@ function formFor(
   values: SignupValues,
   errors: SignupErrors,
   token: string | null,
+  selectedDateIds?: number[],
 ): SignupFormView {
+  const dates = listSignupDates(services.db, shift, services.now());
+  const allowed = new Set(dates.map((date) => date.id));
+  const picked = (selectedDateIds ?? [shift.id]).filter((id) => allowed.has(id));
   return {
     token: token && token.length > 0 ? token : issueFormToken(services.config.sessionSecret, {
       shiftId: shift.id,
@@ -266,6 +433,8 @@ function formFor(
     siteKey: services.config.turnstile.siteKey,
     values,
     errors,
+    dates,
+    selectedDateIds: picked,
   };
 }
 

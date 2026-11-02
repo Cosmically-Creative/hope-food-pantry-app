@@ -8,3 +8,4 @@ data/
 npm-debug.log*
 *.log
 .cursor
+.verify-data/
