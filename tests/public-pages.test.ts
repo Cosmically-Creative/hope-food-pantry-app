@@ -150,6 +150,9 @@ describe('public pages', () => {
     const shiftHtml = await shift.text();
     expect(shift.status).toBe(200);
     expect(shiftHtml).toContain('Open Sorting');
+    expect(shiftHtml).toContain('Thursday, October 15, 2026');
+    expect(shiftHtml).toContain('dateTime="2026-10-15"');
+    expect(shiftHtml).toContain('9:00 AM');
     expect(shiftHtml).not.toContain('class="crumb"');
     const shiftMain = shiftHtml.slice(shiftHtml.indexOf('<main'), shiftHtml.indexOf('class="footer"'));
     expect(shiftMain).not.toContain('Weekly pantry');
@@ -466,6 +469,8 @@ describe('public pages', () => {
     expect(openPane).toContain('>Sign up');
     expect(openPane).toContain('href="/s/');
     expect(openPane).toContain('data-signup=""');
+    expect(openPane).toContain('9:00 AM');
+    expect(openPane).not.toContain('Wednesday, October 21, 2026');
   });
 
   it('keeps a finished shift on today and drops that day at midnight', async () => {

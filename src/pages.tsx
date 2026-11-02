@@ -742,7 +742,7 @@ function ShiftPane(props: { config: AppConfig; shift: PublicShift }) {
     <section class={shift.ended ? 'shift-pane is-ended' : 'shift-pane'}>
       <div class="shift-pane-body">
         <h3>{shift.role}</h3>
-        <ShiftWhen shift={shift} />
+        <ShiftWhen shift={shift} showDate={false} />
         <p class="status">{shift.inProgress ? 'In progress' : ''}</p>
         <Spots shift={shift} />
         <h4 class="roster-label">Volunteers</h4>
@@ -978,10 +978,15 @@ function RosterNames(props: { config: AppConfig; shiftId: number; names: string[
   );
 }
 
-function ShiftWhen(props: { shift: PublicShift }) {
+function ShiftWhen(props: { shift: PublicShift; showDate?: boolean }) {
   const shift = props.shift;
   return (
     <p class="when">
+      {props.showDate === false ? null : (
+        <time class="when-date" dateTime={shift.when.date}>
+          {shift.when.dateLabel}
+        </time>
+      )}
       <time dateTime={shift.startsAtUtc}>{shift.when.startLabel}</time>
       {' to '}
       {shift.when.sameDay ? null : (

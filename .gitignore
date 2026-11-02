@@ -7,3 +7,4 @@ data/
 !.env.production.example
 npm-debug.log*
 *.log
+.cursor
