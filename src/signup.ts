@@ -106,10 +106,17 @@ export type PartySizeResult =
  * Changes how many spots this one signup holds. The signup stays confirmed, under the same name.
  * A smaller count frees the difference. A larger count is saved only when the shift still has room
  * and the new count is within the stored maximum. Saving the current count does not write again.
+ * A real change tells each active coordinator once for that new count.
  */
-export function changePartySize(db: Database.Database, token: string, groupSize: number, now: string): PartySizeResult {
+export function changePartySize(
+  db: Database.Database,
+  token: string,
+  groupSize: number,
+  now: string,
+  mail: MailIdentity,
+): PartySizeResult {
   if (!manageTokenShape(token)) return { ok: false, reason: 'invalid' };
-  return db.transaction(() => writePartySize(db, sha256(token), groupSize, now)).immediate();
+  return db.transaction(() => writePartySize(db, sha256(token), groupSize, now, mail)).immediate();
 }
 
 /** How many people this signup may offer, including the spots it already holds. */
@@ -317,11 +324,17 @@ export function confirmedPersonShiftIds(db: Database.Database, emailNorm: string
   return rows.map((row) => row.shift_id);
 }
 
-function writePartySize(db: Database.Database, hash: string, groupSize: number, now: string): PartySizeResult {
+function writePartySize(
+  db: Database.Database,
+  hash: string,
+  groupSize: number,
+  now: string,
+  mail: MailIdentity,
+): PartySizeResult {
   const row = db
     .prepare(
       `SELECT id AS id, status AS status, token_expires_at AS token_expires_at, anonymized_at AS anonymized_at,
-              shift_id AS shift_id, group_size AS group_size, name AS name
+              shift_id AS shift_id, group_size AS group_size, name AS name, email_norm AS email_norm
        FROM signups
        WHERE manage_token_hash = ?`,
     )
@@ -334,6 +347,7 @@ function writePartySize(db: Database.Database, hash: string, groupSize: number, 
         shift_id: number;
         group_size: number;
         name: string | null;
+        email_norm: string | null;
       }
     | undefined;
   if (!row || row.anonymized_at || !row.token_expires_at || row.token_expires_at <= now || !row.name) {
@@ -357,6 +371,22 @@ function writePartySize(db: Database.Database, hash: string, groupSize: number, 
     )
     .run(groupSize, now, row.id, now, current);
   if (updated.changes !== 1) return { ok: false, reason: 'invalid' };
+  const shift = row.email_norm ? loadShiftFacts(db, row.shift_id) : null;
+  if (shift && row.email_norm) {
+    queueCoordinatorNotices(db, {
+      action: 'party',
+      signupId: row.id,
+      shiftId: row.shift_id,
+      shiftVersion: shift.version,
+      volunteerName: row.name,
+      volunteerEmail: row.email_norm,
+      groupSize,
+      previousGroupSize: current,
+      shift: shift.facts,
+      mail,
+      now,
+    });
+  }
   return { ok: true, groupSize, changed: true };
 }
 

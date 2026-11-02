@@ -9,7 +9,7 @@ import { loadConfig } from '../src/config.js';
 import { openAppDatabase } from '../src/db.js';
 import { deliverDueMail } from '../src/mail/deliver.js';
 import type { Mailer } from '../src/mail/types.js';
-import { cancelSignup, reserveSignup, type ReserveInput } from '../src/signup.js';
+import { cancelSignup, changePartySize, reserveSignup, type ReserveInput } from '../src/signup.js';
 import { devEnv } from './env.js';
 
 const NOW = '2026-10-14T18:00:00.000Z';
@@ -185,6 +185,36 @@ describe('coordinator roster notices', () => {
     expect(forgotten.db.prepare(`SELECT status, last_error FROM outbox WHERE kind = 'notice'`).get()).toEqual({
       status: 'cancelled',
       last_error: 'The signup is no longer available.',
+    });
+  });
+
+  it('tells coordinators when a signup changes from one person to eight, once for that new size', async () => {
+    const { db, shiftId } = await buildDb();
+    db.prepare('UPDATE shifts SET capacity = 10 WHERE id = ?').run(shiftId);
+    insertCoordinator(db, 'ada@example.invalid', 'Ada Admin', 1);
+    const saved = reserveSignup(db, reservation(shiftId, { groupSize: 1, operationId: 'party-source' }));
+    if (!saved.ok || !saved.manageToken) throw new Error('Signup was not saved.');
+
+    expect(changePartySize(db, saved.manageToken, 8, NOW, MAIL)).toEqual({ ok: true, groupSize: 8, changed: true });
+    const party = db
+      .prepare(`SELECT subject, body_text, dedupe_key FROM outbox WHERE kind = 'notice' AND subject LIKE 'Pat Review changed to %'`)
+      .get() as { subject: string; body_text: string; dedupe_key: string };
+    expect(party.subject).toBe('Pat Review changed to 8 people for Sorting');
+    expect(party.body_text).toContain('from 1 person to 8 people');
+    expect(party.dedupe_key).toBe(`notice:party:v1:8:${saved.signupId}:ada@example.invalid`);
+    expect(party.body_text).toContain('That takes 7 more spots.');
+    expect(party.body_text).toContain(`/admin/shifts/${shiftId}`);
+    expect(party.body_text).not.toContain('/m/');
+    expect(db.prepare(`SELECT kind FROM outbox WHERE kind != 'notice'`).all()).toEqual([{ kind: 'confirmation' }]);
+
+    expect(changePartySize(db, saved.manageToken, 8, NOW, MAIL)).toEqual({ ok: true, groupSize: 8, changed: false });
+    expect(changePartySize(db, saved.manageToken, 5, NOW, MAIL)).toEqual({ ok: true, groupSize: 5, changed: true });
+    expect(db.prepare(`SELECT subject FROM outbox WHERE kind = 'notice' AND subject LIKE 'Pat Review changed to %' ORDER BY subject`).all()).toEqual([
+      { subject: 'Pat Review changed to 5 people for Sorting' },
+      { subject: 'Pat Review changed to 8 people for Sorting' },
+    ]);
+    expect(db.prepare(`SELECT status FROM outbox WHERE kind = 'notice' AND subject = 'Pat Review signed up for Sorting'`).get()).toEqual({
+      status: 'pending',
     });
   });
 

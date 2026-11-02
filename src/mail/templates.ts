@@ -165,7 +165,7 @@ export function renderReminder(input: {
   return { subject, text: lines.join('\n'), html };
 }
 
-export type CoordinatorNoticeAction = 'signup' | 'cancel' | 'switch' | 'move' | 'change';
+export type CoordinatorNoticeAction = 'signup' | 'cancel' | 'switch' | 'move' | 'change' | 'party';
 
 /** A roster notice for coordinators. It names the person and links to the shift. It does not include the private signup link. */
 export function renderCoordinatorNotice(input: {
@@ -174,6 +174,7 @@ export function renderCoordinatorNotice(input: {
   volunteerEmail: string;
   phone: string | null;
   groupSize?: number;
+  previousGroupSize?: number;
   action: CoordinatorNoticeAction;
   shift: MailShift;
   fromShift?: MailShift;
@@ -250,6 +251,7 @@ export function renderMagicLink(input: { signInUrl: string; replyTo: string }): 
 function noticeCopy(input: {
   volunteerName: string;
   groupSize?: number;
+  previousGroupSize?: number;
   action: CoordinatorNoticeAction;
   shift: MailShift;
   fromShift?: MailShift;
@@ -260,6 +262,7 @@ function noticeCopy(input: {
   const from = input.fromShift
     ? ` from ${singleLine(input.fromShift.role)} (${singleLine(input.fromShift.whenLabel)})`
     : '';
+  if (input.action === 'party') return partyChangeCopy(name, role, input.previousGroupSize, input.groupSize ?? 1);
   if (input.action === 'signup') {
     return { subject: `${name} signed up for ${role}`, hello: `${name} signed up for ${role}.${party}` };
   }
@@ -282,6 +285,29 @@ function noticeCopy(input: {
   return {
     subject: `${name}'s ${role} shift changed`,
     hello: `The time or place for ${name}'s ${role} shift has changed.${party}`,
+  };
+}
+
+function partyChangeCopy(
+  name: string,
+  role: string,
+  previous: number | undefined,
+  next: number,
+): { subject: string; hello: string } {
+  const nextPeople = next === 1 ? '1 person' : `${next} people`;
+  const subject = `${name} changed to ${nextPeople} for ${role}`;
+  if (!previous || previous === next) {
+    const spots = next === 1 ? '1 spot' : `${next} spots`;
+    return { subject, hello: `${name} changed this signup for ${role} to ${nextPeople}. This signup holds ${spots}.` };
+  }
+  const previousPeople = previous === 1 ? '1 person' : `${previous} people`;
+  const difference = next - previous;
+  const delta = difference > 0
+    ? `That takes ${difference} more ${difference === 1 ? 'spot' : 'spots'}.`
+    : `That opens ${-difference} ${difference === -1 ? 'spot' : 'spots'}.`;
+  return {
+    subject,
+    hello: `${name} changed this signup for ${role} from ${previousPeople} to ${nextPeople}. ${delta}`,
   };
 }
 

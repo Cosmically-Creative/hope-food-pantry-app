@@ -66,7 +66,8 @@ export function queueChanged(db: Database.Database, input: QueuedSignup, reason:
 
 /**
  * One roster notice per active coordinator.
- * The private signup link is not included. The same signup and change does not add a second row.
+ * The private signup link is not included.
+ * The same signup, action, shift version, and party size does not add a second row.
  */
 export function queueCoordinatorNotices(
   db: Database.Database,
@@ -78,6 +79,7 @@ export function queueCoordinatorNotices(
     volunteerName: string;
     volunteerEmail: string;
     groupSize?: number;
+    previousGroupSize?: number;
     shift: MailShift;
     fromShift?: MailShift;
     mail: MailIdentity;
@@ -111,6 +113,7 @@ export function queueCoordinatorNotices(
       volunteerEmail: input.volunteerEmail,
       phone: phoneRow?.phone ?? null,
       groupSize: input.groupSize,
+      previousGroupSize: input.previousGroupSize,
       action: input.action,
       shift: input.shift,
       fromShift: input.fromShift,
@@ -118,7 +121,7 @@ export function queueCoordinatorNotices(
       replyTo: input.mail.replyTo,
     });
     insert.run(
-      `notice:${input.action}:v${input.shiftVersion}:${input.signupId}:${coordinator.email}`,
+      `notice:${input.action}:v${input.shiftVersion}:${input.groupSize ?? 1}:${input.signupId}:${coordinator.email}`,
       input.signupId,
       input.shiftId,
       coordinator.email,

@@ -463,7 +463,7 @@ async function submitParty(c: Context, services: SignupServices): Promise<Respon
     : parsePartySize(raw);
   if (!parsed.ok) return showManage(c, services, token, 400, undefined, parsed.error);
   try {
-    const result = changePartySize(services.db, token, parsed.groupSize, services.now());
+    const result = changePartySize(services.db, token, parsed.groupSize, services.now(), mailIdentity(services.db, services.config));
     if (!result.ok && result.reason === 'cancelled') return showManage(c, services, token, 400, 'This signup is cancelled.');
     if (!result.ok && result.reason === 'full') {
       const spotsLeft = result.spotsLeft ?? 0;
