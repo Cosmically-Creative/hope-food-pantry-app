@@ -291,7 +291,7 @@ function redirectGrouped(
   services: SignupServices,
   pageShiftId: number,
   signups: Array<{ signupId: number; shiftId: number; manageToken: string | null }>,
-): Response {
+): Promise<Response> | Response {
   const primary = signups.find((row) => row.shiftId === pageShiftId) ?? signups[0];
   if (!primary) return html(c, services, 'That page is not available · Hope Volunteer', <NotFoundPage />, 404);
   const issued = signups.every((row) => row.manageToken)
@@ -315,7 +315,7 @@ function groupFailure(
   selectedDateIds: number[],
   reason: 'not_found' | 'closed' | 'early' | 'full' | 'duplicate' | 'conflict',
   shiftId: number,
-): Response {
+): Promise<Response> | Response {
   const failed = getPublicShift(services.db, shiftId, services.now());
   const label = failed ? shiftChoiceLabel(failed, shift) : undefined;
   const errors: SignupErrors = {};
