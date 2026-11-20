@@ -243,13 +243,21 @@ function templateInput(overrides: Partial<{ weekday: number; role: string; capac
   };
 }
 
-function shiftRows(db: Awaited<ReturnType<typeof openDb>>) {
+type ShiftRow = {
+  occurrence_date: string | null;
+  role: string;
+  capacity: number;
+  template_revision: number | null;
+  cancelled: number;
+};
+
+function shiftRows(db: Awaited<ReturnType<typeof openDb>>): ShiftRow[] {
   return db
     .prepare(
       `SELECT occurrence_date, role, capacity, template_revision, cancelled
        FROM shifts ORDER BY occurrence_date`,
     )
-    .all();
+    .all() as ShiftRow[];
 }
 
 async function openDb() {

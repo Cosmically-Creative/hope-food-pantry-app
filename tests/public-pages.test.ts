@@ -292,11 +292,13 @@ describe('public pages', () => {
     const rules = await app.request('/speculation-rules.json');
     expect(rules.status).toBe(200);
     expect(rules.headers.get('content-type')).toContain('application/speculationrules+json');
-    const body = await rules.json();
-    expect(body.prefetch[0].eagerness).toBe('moderate');
-    expect(body.prefetch[0].where.and[1].not.selector_matches).toContain('[data-confirm]');
-    expect(body.prefetch[0].where.and[1].not.selector_matches).toContain('[data-open-event]');
-    expect(body.prefetch[0].where.and[1].not.selector_matches).toContain('[data-signup]');
+    const body = (await rules.json()) as {
+      prefetch: { eagerness: string; where: { and: { not: { selector_matches: string } }[] } }[];
+    };
+    expect(body.prefetch[0]!.eagerness).toBe('moderate');
+    expect(body.prefetch[0]!.where.and[1]!.not.selector_matches).toContain('[data-confirm]');
+    expect(body.prefetch[0]!.where.and[1]!.not.selector_matches).toContain('[data-open-event]');
+    expect(body.prefetch[0]!.where.and[1]!.not.selector_matches).toContain('[data-signup]');
   });
 
   it('prefixes routes and assets when the app is mounted at /volunteer', async () => {
