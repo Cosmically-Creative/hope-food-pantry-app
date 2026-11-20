@@ -2259,6 +2259,11 @@ article.shift-card {
   display: flex;
 }
 
+.settings-more {
+  max-width: 46rem;
+  margin-top: 2rem;
+}
+
 @media (max-width: 42em) {
   .settings-fields {
     grid-template-columns: 1fr;
@@ -3279,16 +3284,66 @@ button.btn-quiet::before {
   margin: 0.15rem 0 0;
 }
 
-.desk-links {
+/* Coordinator tabs. Same family as the session bar: a white pill, plain links, a gold line under the current one. */
+.desk-tabs {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.35rem 0.9rem;
-  font-size: 0.95rem;
+  align-items: center;
+  gap: 0 1.75rem;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 1.25rem;
+  padding: 0 1.5rem;
+  background: #fff;
+  border: 1px solid #e6eef3;
+  border-radius: 999px;
+  box-shadow: var(--hope-shadow-soft);
 }
 
-.desk-links a {
+.desk-tabs a {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  color: var(--hope-ink);
+  font-size: 1.05rem;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.desk-tabs a:hover {
+  color: var(--hope-ink-2);
+}
+
+.desk-tabs a[aria-current] {
   font-weight: 650;
+}
+
+.desk-tabs a[aria-current]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 10px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--hope-gold);
+}
+
+.desk-tabs a:focus-visible {
+  outline: 2px solid var(--hope-ink);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+@media (max-width: 42em) {
+  .desk-tabs {
+    width: 100%;
+    justify-content: space-between;
+    gap: 0 1rem;
+    padding: 0 1.25rem;
+  }
 }
 
 .coordinator-board {
@@ -5846,6 +5901,7 @@ main > .crumb,
   .header,
   .footer,
   .session-bar,
+  .desk-tabs,
   .crumb,
   .desk-actions,
   .desk-inline,

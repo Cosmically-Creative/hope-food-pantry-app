@@ -274,11 +274,6 @@ export function AdminHome(props: {
           <p class={props.backupSavedToday ? 'desk-note is-saved' : 'desk-note'}>
             {props.backupSavedToday ? <BackupSavedToday /> : <BackupNote text={props.backupNote} />}
           </p>
-          <nav class="desk-links" aria-label="Coordinator">
-            <a href={appPath(props.config, '/admin/contacts')}>Contacts</a>
-            <a href={appPath(props.config, '/admin/settings')}>Settings</a>
-            <a href={appPath(props.config, '/admin/admins')}>Administrators</a>
-          </nav>
         </div>
       </header>
       <Notice notice={props.notice} />
@@ -375,7 +370,6 @@ export function SettingsPage(props: {
   const keepNote = retentionPreview(props.values.retentionMonths);
   return (
     <>
-      <Crumb items={[{ href: appPath(props.config, '/admin'), label: 'Coordinator' }, { label: 'Settings' }]} />
       <header class="settings-intro">
         <h1>Settings</h1>
         <p>Choose when volunteers get a reminder, where their replies go, and how long signup details stay here. This applies to email that has not gone out yet.</p>
@@ -437,6 +431,17 @@ export function SettingsPage(props: {
           <button type="submit">Save these choices</button>
         </div>
       </form>
+      <section class="settings-card settings-more" aria-labelledby="admins-heading">
+        <div class="settings-card-copy">
+          <h2 id="admins-heading">Administrators</h2>
+          <p>Choose who can sign in to this coordinator area.</p>
+        </div>
+        <div>
+          <a class="btn" href={appPath(props.config, '/admin/admins')}>
+            Manage administrators
+          </a>
+        </div>
+      </section>
       <script src={assetHref(props.config, '/js/settings.js')} defer />
     </>
   );
@@ -527,7 +532,13 @@ export function AdminsPage(props: {
   const only = props.admins.length === 1;
   return (
     <>
-      <Crumb items={[{ href: appPath(props.config, '/admin'), label: 'Coordinator' }, { label: 'Administrators' }]} />
+      <Crumb
+        items={[
+          { href: appPath(props.config, '/admin'), label: 'Coordinator' },
+          { href: appPath(props.config, '/admin/settings'), label: 'Settings' },
+          { label: 'Administrators' },
+        ]}
+      />
       <h1>Administrators</h1>
       <Notice notice={props.notice} />
       <p>
@@ -634,7 +645,6 @@ export function ContactsPage(props: {
   const importOpen = Boolean(props.importError);
   return (
     <>
-      <Crumb items={[{ href: appPath(props.config, '/admin'), label: 'Coordinator' }, { label: 'Contacts' }]} />
       <h1>Contacts</h1>
       {props.summary ? <Notice text={contactImportSentence(props.summary)} /> : <Notice notice={props.notice} />}
       {props.summary && props.summary.skips.length > 0 ? (

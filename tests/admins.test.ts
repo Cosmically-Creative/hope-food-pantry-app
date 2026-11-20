@@ -37,12 +37,22 @@ describe('administrators', () => {
     const { app, db } = await buildApp();
     const cookie = await signIn(app, db, 'coordinator@example.invalid');
     const home = await app.request('/admin', { headers: { cookie } });
-    expect(await home.text()).toContain('href="/admin/admins"');
+    const homeHtml = await home.text();
+    expect(homeHtml).toContain('<nav class="desk-tabs" aria-label="Coordinator">');
+    expect(homeHtml).toContain('<a href="/admin" aria-current="page">Shifts</a>');
+    expect(homeHtml).toContain('<a href="/admin/contacts">Contacts</a>');
+    expect(homeHtml).not.toContain('href="/admin/admins"');
+    const settings = await (await app.request('/admin/settings', { headers: { cookie } })).text();
+    expect(settings).toContain('<a href="/admin/settings" aria-current="page">Settings</a>');
+    expect(settings).toContain('href="/admin/admins"');
+    expect(settings).toContain('Manage administrators');
 
     const first = await app.request('/admin/admins', { headers: { cookie } });
     const firstHtml = await first.text();
     expect(first.status).toBe(200);
     expect(firstHtml).toContain('Administrator');
+    expect(firstHtml).toContain('<a href="/admin/settings" aria-current="true">Settings</a>');
+    expect(firstHtml).toContain('<a href="/admin/settings">Settings</a>');
     expect(firstHtml).toContain('coordinator@example.invalid');
     expect(firstHtml).toContain('>You</span>');
     expect(firstHtml).toContain('This is the only administrator.');

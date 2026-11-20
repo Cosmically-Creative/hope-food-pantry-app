@@ -120,6 +120,7 @@ export function Layout(props: {
               </form>
             ) : null}
           </div>
+          {props.account && pathIs(props.path, appPath(props.config, '/admin')) ? <CoordinatorTabs config={props.config} path={props.path} /> : null}
           {props.children}
         </main>
         <footer class="footer">
@@ -220,6 +221,32 @@ export function Layout(props: {
         <script src={asset(props.config, '/js/enhance.js')} defer />
       </body>
     </html>
+  );
+}
+
+/**
+ * Coordinator sections, on every signed-in coordinator page.
+ * Shifts covers the dashboard, events, shifts, and templates. Administrators sits under Settings.
+ */
+function CoordinatorTabs(props: { config: AppConfig; path?: string }) {
+  const shifts = appPath(props.config, '/admin');
+  const contacts = appPath(props.config, '/admin/contacts');
+  const settings = appPath(props.config, '/admin/settings');
+  const admins = appPath(props.config, '/admin/admins');
+  const section = pathIs(props.path, contacts) ? 'contacts' : pathIs(props.path, settings) || pathIs(props.path, admins) ? 'settings' : 'shifts';
+  const tabs = [
+    { key: 'shifts', href: shifts, label: 'Shifts' },
+    { key: 'contacts', href: contacts, label: 'Contacts' },
+    { key: 'settings', href: settings, label: 'Settings' },
+  ];
+  return (
+    <nav class="desk-tabs" aria-label="Coordinator">
+      {tabs.map((tab) => (
+        <a key={tab.key} href={tab.href} aria-current={tab.key === section ? (props.path === tab.href ? 'page' : 'true') : undefined}>
+          {tab.label}
+        </a>
+      ))}
+    </nav>
   );
 }
 
