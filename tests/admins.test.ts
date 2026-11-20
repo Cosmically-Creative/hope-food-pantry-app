@@ -24,6 +24,11 @@ describe('administrators', () => {
     const page = await app.request('/admin/admins');
     expect(page.status).toBe(303);
     expect(page.headers.get('location')).toBe('/login');
+    const login = await app.request('/login');
+    expect(login.status).toBe(200);
+    const loginHtml = await login.text();
+    expect(loginHtml).toContain('session-entry');
+    expect(loginHtml).not.toContain('coord-menu');
     const posted = await app.request('/admin/admins', {
       method: 'POST',
       headers: { origin: ORIGIN, 'content-type': 'application/x-www-form-urlencoded' },
@@ -38,10 +43,18 @@ describe('administrators', () => {
     const cookie = await signIn(app, db, 'coordinator@example.invalid');
     const home = await app.request('/admin', { headers: { cookie } });
     const homeHtml = await home.text();
-    expect(homeHtml).toContain('<nav class="desk-tabs" aria-label="Coordinator">');
+    expect(homeHtml).toContain('<details class="coord-menu">');
+    expect(homeHtml).toContain('<summary class="session-here">Coordinator</summary>');
     expect(homeHtml).toContain('<a href="/admin" aria-current="page">Shifts</a>');
     expect(homeHtml).toContain('<a href="/admin/contacts">Contacts</a>');
+    expect(homeHtml).toContain('<a href="/admin/settings">Settings</a>');
     expect(homeHtml).not.toContain('href="/admin/admins"');
+    expect(homeHtml).toContain('<nav class="session-sections" aria-label="Coordinator">');
+    const publicHtml = await (await app.request('/', { headers: { cookie } })).text();
+    expect(publicHtml).toContain('<details class="coord-menu">');
+    expect(publicHtml).toContain('<summary>Coordinator</summary>');
+    expect(publicHtml).toContain('<a href="/admin">Shifts</a>');
+    expect(publicHtml).not.toMatch(/href="\/admin[^"]*" aria-current/);
     const settings = await (await app.request('/admin/settings', { headers: { cookie } })).text();
     expect(settings).toContain('<a href="/admin/settings" aria-current="page">Settings</a>');
     expect(settings).toContain('href="/admin/admins"');

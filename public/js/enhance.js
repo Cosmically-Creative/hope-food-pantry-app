@@ -27,7 +27,7 @@
   }
 
   function bindViewMenu() {
-    var menus = document.querySelectorAll('details.view-menu, details.manage-menu');
+    var menus = document.querySelectorAll('details.view-menu, details.manage-menu, details.coord-menu');
     if (!menus.length) return;
     document.addEventListener('click', function (event) {
       for (var i = 0; i < menus.length; i += 1) {

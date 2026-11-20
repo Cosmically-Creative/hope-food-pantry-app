@@ -38,6 +38,8 @@ export function Layout(props: {
   const home = appPath(props.config, '/');
   const coordinator = appPath(props.config, props.account ? '/admin' : '/login');
   const coordinatorHere = pathIs(props.path, coordinator);
+  const adminHere = pathIs(props.path, appPath(props.config, '/admin'));
+  const sections = props.account ? coordinatorSections(props.config, props.path) : [];
   const volunteeringCurrent = props.path === home ? 'page' : undefined;
   const logo = asset(props.config, '/img/logo.png');
   const menu = asset(props.config, '/img/icons/menu.svg');
@@ -110,17 +112,39 @@ export function Layout(props: {
             <a href={home} aria-current={props.path === home ? 'page' : undefined}>
               Sign Up
             </a>
-            <a href={coordinator} class={props.account ? undefined : 'session-entry'} aria-current={coordinatorHere ? 'page' : undefined}>
-              Coordinator
-            </a>
+            {props.account ? (
+              <details class="coord-menu">
+                <summary class={adminHere ? 'session-here' : undefined}>Coordinator</summary>
+                <div class="coord-menu-list">
+                  {sections.map((section) => (
+                    <a key={section.key} href={section.href} aria-current={section.current}>
+                      {section.label}
+                    </a>
+                  ))}
+                </div>
+              </details>
+            ) : (
+              <a href={coordinator} class="session-entry" aria-current={coordinatorHere ? 'page' : undefined}>
+                Coordinator
+              </a>
+            )}
             {props.account ? (
               <form method="post" action={appPath(props.config, '/logout')} class="session-logout">
                 <input type="hidden" name="csrf" value={props.account.csrf} />
                 <button type="submit">Log out</button>
               </form>
             ) : null}
+            {props.account ? (
+              <nav class="session-sections" aria-label="Coordinator">
+                <span class="session-sections-label">Coordinator</span>
+                {sections.map((section) => (
+                  <a key={section.key} href={section.href} aria-current={section.current}>
+                    {section.label}
+                  </a>
+                ))}
+              </nav>
+            ) : null}
           </div>
-          {props.account && pathIs(props.path, appPath(props.config, '/admin')) ? <CoordinatorTabs config={props.config} path={props.path} /> : null}
           {props.children}
         </main>
         <footer class="footer">
@@ -225,29 +249,24 @@ export function Layout(props: {
 }
 
 /**
- * Coordinator sections, on every signed-in coordinator page.
+ * Coordinator sections for the dropdown and the phone row.
  * Shifts covers the dashboard, events, shifts, and templates. Administrators sits under Settings.
  */
-function CoordinatorTabs(props: { config: AppConfig; path?: string }) {
-  const shifts = appPath(props.config, '/admin');
-  const contacts = appPath(props.config, '/admin/contacts');
-  const settings = appPath(props.config, '/admin/settings');
-  const admins = appPath(props.config, '/admin/admins');
-  const section = pathIs(props.path, contacts) ? 'contacts' : pathIs(props.path, settings) || pathIs(props.path, admins) ? 'settings' : 'shifts';
-  const tabs = [
-    { key: 'shifts', href: shifts, label: 'Shifts' },
-    { key: 'contacts', href: contacts, label: 'Contacts' },
-    { key: 'settings', href: settings, label: 'Settings' },
-  ];
-  return (
-    <nav class="desk-tabs" aria-label="Coordinator">
-      {tabs.map((tab) => (
-        <a key={tab.key} href={tab.href} aria-current={tab.key === section ? (props.path === tab.href ? 'page' : 'true') : undefined}>
-          {tab.label}
-        </a>
-      ))}
-    </nav>
-  );
+function coordinatorSections(config: AppConfig, path?: string) {
+  // Off coordinator pages (the public schedule, a signup page), no section is current.
+  const inAdmin = pathIs(path, appPath(config, '/admin'));
+  const section = !inAdmin
+    ? null
+    : pathIs(path, appPath(config, '/admin/contacts'))
+    ? 'contacts'
+    : pathIs(path, appPath(config, '/admin/settings')) || pathIs(path, appPath(config, '/admin/admins'))
+      ? 'settings'
+      : 'shifts';
+  return [
+    { key: 'shifts', href: appPath(config, '/admin'), label: 'Shifts' },
+    { key: 'contacts', href: appPath(config, '/admin/contacts'), label: 'Contacts' },
+    { key: 'settings', href: appPath(config, '/admin/settings'), label: 'Settings' },
+  ].map((item) => ({ ...item, current: item.key === section ? (path === item.href ? 'page' : 'true') : undefined }));
 }
 
 export function EmptySchedulePage() {
