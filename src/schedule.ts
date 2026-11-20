@@ -232,9 +232,29 @@ function dateChoice(shift: PublicShift): SignupDateChoice {
   };
 }
 
-export function spotsSentence(shift: Pick<PublicShift, 'occupied' | 'capacity'>): string {
+/** "4 of 6". Every page counts filled spots this one way. */
+export function filledCount(shift: Pick<PublicShift, 'occupied' | 'capacity'>): string {
   const filled = Math.min(shift.capacity, Math.max(0, shift.occupied));
-  return `${filled}/${shift.capacity} spots filled`;
+  return `${filled} of ${shift.capacity}`;
+}
+
+/** Volunteer pages and the roster heading: "4 of 6 spots filled". */
+export function spotsSentence(shift: Pick<PublicShift, 'occupied' | 'capacity'>): string {
+  return `${filledCount(shift)} spots filled`;
+}
+
+export type FillTone = 'full' | 'open' | 'needs';
+
+/**
+ * Coordinator list pills: the state first, then the count.
+ * "Full · 6 of 6" or "2 open · 4 of 6". A shift less than half filled uses the needs tone.
+ */
+export function fillLabel(shift: Pick<PublicShift, 'occupied' | 'capacity'>): { tone: FillTone; text: string } {
+  const filled = Math.min(shift.capacity, Math.max(0, shift.occupied));
+  const open = Math.max(0, shift.capacity - filled);
+  const count = filledCount(shift);
+  if (open === 0) return { tone: 'full', text: `Full · ${count}` };
+  return { tone: open * 2 > shift.capacity ? 'needs' : 'open', text: `${open} open · ${count}` };
 }
 
 /** One roster line. A signup that holds several spots stays one name, with the count beside it. */

@@ -319,7 +319,7 @@ describe('capacity-safe signup', () => {
     expect(manageHtml).toContain('People');
     expect(manageHtml).toContain('>3<');
     const shiftHtml = await (await app.request(`/s/${shiftId}`)).text();
-    expect(shiftHtml).toContain('3/4 spots filled');
+    expect(shiftHtml).toContain('3 of 4 spots filled');
     const board = await (await app.request('/?view=calendar')).text();
     expect(board).toContain('Pat Review (3 people)');
     expect(board).not.toContain('Pat Review (3 people), Pat Review');

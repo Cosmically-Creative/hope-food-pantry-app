@@ -48,7 +48,7 @@ describe('manage-link cancellation', () => {
     expect(before.created_at).toBe(before.updated_at);
 
     const full = await app.request(`/s/${shiftId}`);
-    expect(await full.text()).toContain('1/1 spots filled');
+    expect(await full.text()).toContain('1 of 1 spots filled');
 
     const cancelled = await postCancel(app, managePath, token);
     expect(cancelled.status).toBe(303);
@@ -73,7 +73,7 @@ describe('manage-link cancellation', () => {
 
     const open = await app.request(`/s/${shiftId}`);
     const openHtml = await open.text();
-    expect(openHtml).toContain('0/1 spots filled');
+    expect(openHtml).toContain('0 of 1 spots filled');
     expect(openHtml).not.toContain('pat.cancel@example.invalid');
 
     const again = await postCancel(app, managePath, token, { ip: '203.0.113.71' });
@@ -87,7 +87,7 @@ describe('manage-link cancellation', () => {
       { status: 'cancelled' },
       { status: 'confirmed' },
     ]);
-    expect((await (await app.request(`/s/${shiftId}`)).text())).toContain('1/1 spots filled');
+    expect((await (await app.request(`/s/${shiftId}`)).text())).toContain('1 of 1 spots filled');
     const listed = await (await app.request('/?view=calendar')).text();
     expect(listed).toContain('Pat Cancel');
     expect(listed).not.toContain('pat.cancel@example.invalid');
@@ -215,8 +215,8 @@ describe('manage-link switch', () => {
     const home = await (await app.request('/?view=calendar')).text();
     expect(home).not.toContain('pat.switch@example.invalid');
     expect(home).toContain('Pat Cancel');
-    expect(home).toContain('0/2 spots filled');
-    expect(home).toContain('1/2 spots filled');
+    expect(home).toContain('0 of 2 spots filled');
+    expect(home).toContain('1 of 2 spots filled');
 
     const again = await postSwitch(app, managePath, html, String(destinationId));
     expect(again.status).toBe(200);
@@ -376,7 +376,7 @@ describe('manage-link party size', () => {
     }]);
     expect(db.prepare('SELECT COUNT(*) AS n FROM contacts').get()).toEqual({ n: 1 });
     expect(db.prepare("SELECT kind, status FROM outbox").all()).toEqual([{ kind: 'confirmation', status: 'pending' }]);
-    expect(await (await app.request(`/s/${shiftId}`)).text()).toContain('1/6 spots filled');
+    expect(await (await app.request(`/s/${shiftId}`)).text()).toContain('1 of 6 spots filled');
     const board = await (await app.request('/?view=calendar')).text();
     expect(board).toContain('Pat Party');
     expect(board).not.toContain('Pat Party (4 people)');
@@ -404,7 +404,7 @@ describe('manage-link party size', () => {
       { name: 'Pat Party', group_size: 3 },
       { name: 'Sam Other', group_size: 1 },
     ]);
-    expect(await (await tight.app.request(`/s/${tight.shiftId}`)).text()).toContain('4/4 spots filled');
+    expect(await (await tight.app.request(`/s/${tight.shiftId}`)).text()).toContain('4 of 4 spots filled');
 
     const wide = await buildApp({ capacity: 25 });
     const opened = await postSignup(wide.app, wide.shiftId, { name: 'Pat Party', email: 'pat.wide@example.invalid', partySize: '1' }, '203.0.113.122');
@@ -426,7 +426,7 @@ describe('manage-link party size', () => {
       group_size: 20,
       status: 'confirmed',
     }]);
-    expect(await (await wide.app.request(`/s/${wide.shiftId}`)).text()).toContain('20/25 spots filled');
+    expect(await (await wide.app.request(`/s/${wide.shiftId}`)).text()).toContain('20 of 25 spots filled');
   });
 
   it('refuses a party update that did not come from this signup page', async () => {

@@ -266,7 +266,7 @@ describe('coordinator screens', () => {
     expect(html).toContain('Today, 4:00 PM');
     expect(html).toContain('2 open · 4 of 6');
     expect(html).toContain('Tue, Oct 27, 4:00 PM');
-    expect(html).toContain('Needs 4 · 2 of 6');
+    expect(html).toContain('4 open · 2 of 6');
     expect(html).toContain('Sat, Oct 24 Sorting crew is full.');
     expect(html).toContain('Wed, Oct 28, 9:00 AM');
     expect(html).not.toContain('Later shift');
@@ -589,7 +589,7 @@ describe('coordinator screens', () => {
     expect(roster).not.toContain('No-show');
     const sourceRoster = await (await app.request(`/admin/shifts/${sourceId}`, { headers: { cookie } })).text();
     expect(sourceRoster).not.toContain(`/admin/signups/${signupId}/move`);
-    expect(sourceRoster).toContain('0/2 spots filled');
+    expect(sourceRoster).toContain('0 of 2 spots filled');
     expect(sourceRoster).toContain('event-pill is-open');
     const home = await (await app.request('/e/pantry?view=calendar')).text();
     const shiftPage = await (await app.request(`/s/${destinationId}`)).text();

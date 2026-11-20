@@ -40,8 +40,8 @@ describe('public pages', () => {
     expect(home.headers.get('x-robots-tag')).toBe('noindex');
     expect(html).toContain('class="roster-mark" src="/img/sunburst.png?v=');
     expect(html).toContain('Live Greeting');
-    expect(html).toContain('0/2 spots filled');
-    expect(html).toContain('1/4 spots filled');
+    expect(html).toContain('0 of 2 spots filled');
+    expect(html).toContain('1 of 4 spots filled');
     expect(html).toContain('9:00 AM');
     expect(html).toContain('CDT');
     expect(html).toContain('October 14');
@@ -131,8 +131,8 @@ describe('public pages', () => {
     expect(calendar).toContain('October 2026');
     expect(calendar).toContain('Open Sorting');
     expect(calendar).toContain('Full Intake');
-    expect(calendar).toContain('1/3 spots filled');
-    expect(calendar).toContain('1/1 spots filled');
+    expect(calendar).toContain('1 of 3 spots filled');
+    expect(calendar).toContain('1 of 1 spots filled');
     expect(calendar).toContain('class="cal-line"');
     expect(calendar).toContain('Past Setup');
     expect(calendar).toContain('class="cal-shift is-ended"');
@@ -161,7 +161,7 @@ describe('public pages', () => {
     const shiftMain = shiftHtml.slice(shiftHtml.indexOf('<main'), shiftHtml.indexOf('class="footer"'));
     expect(shiftMain).not.toContain('Weekly pantry');
     expect(shiftMain).not.toContain('sunburst');
-    expect(shiftHtml).toContain('1/3 spots filled');
+    expect(shiftHtml).toContain('1 of 3 spots filled');
     expect(shiftHtml).toContain('spots is-open');
     expect(shiftHtml).toContain('<form');
     expect(shiftHtml).toContain('name="first_name"');
@@ -199,7 +199,7 @@ describe('public pages', () => {
 
     const full = await app.request(`/s/${ids.full}`);
     const fullHtml = await full.text();
-    expect(fullHtml).toContain('1/1 spots filled');
+    expect(fullHtml).toContain('1 of 1 spots filled');
     expect(fullHtml).toContain('spots is-full');
     expect(fullHtml).not.toContain('<form');
 
@@ -476,7 +476,7 @@ describe('public pages', () => {
     const html = await (await app.request('/')).text();
     const start = html.indexOf('Full Wednesday');
     const pane = html.slice(html.lastIndexOf('<section class="shift-pane"', start), html.indexOf('</section>', start));
-    expect(pane).toContain('1/1 spots filled');
+    expect(pane).toContain('1 of 1 spots filled');
     expect(pane).toContain('class="btn-card is-static"');
     expect(pane).toContain('>Full</span>');
     expect(pane).toContain('Not accepting more signups');

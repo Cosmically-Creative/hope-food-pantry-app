@@ -1,6 +1,6 @@
 import { Temporal } from '@js-temporal/polyfill';
 import { DESK_WINDOW_DAYS, type AdminEvent, type HomeEvent, type HomeShift, type AdminShift, type AdminShiftSummary, type AdminTemplate, type MoveTarget, type RosterPerson } from './admin/store.js';
-import { spotsSentence } from './schedule.js';
+import { fillLabel, spotsSentence } from './schedule.js';
 import type { EventValues, ShiftValues, TemplateValues } from './admin/forms.js';
 import { MAX_REMINDER_HOURS, MAX_RETENTION_MONTHS, type SettingsErrors, type SettingsForm } from './settings.js';
 import type { AppConfig } from './config.js';
@@ -1251,7 +1251,7 @@ function ShiftNeedList(props: { config: AppConfig; shifts: HomeShift[]; today: s
 
 function NeedShift(props: { config: AppConfig; shift: HomeShift; today: string }) {
   const shift = props.shift;
-  const need = shift.full ? { tone: 'full' as const, text: 'Full' } : needCopy(shift.occupied, shift.capacity);
+  const need = fillLabel(shift);
   const when = shiftWhen(shift.date, shift.timeLabel, props.today);
   return (
     <li>
@@ -1331,16 +1331,6 @@ function eventSummary(event: HomeEvent, today: string): string {
   if (!event.nextShift) return event.shiftCount === 0 ? 'No shifts yet' : count;
   const when = event.nextShift.date === today ? `today at ${event.nextShift.timeLabel}` : `${shortDate(event.nextShift.date)} at ${event.nextShift.timeLabel}`;
   return `Next shift ${when} · ${count}`;
-}
-
-function needCopy(occupied: number, capacity: number): { text: string; tone: 'open' | 'needs' } {
-  const filled = Math.min(capacity, Math.max(0, occupied));
-  const open = Math.max(0, capacity - filled);
-  const needs = open * 2 > capacity;
-  return {
-    tone: needs ? 'needs' : 'open',
-    text: needs ? `Needs ${open} · ${filled} of ${capacity}` : `${open} open · ${filled} of ${capacity}`,
-  };
 }
 
 function shiftWhen(date: string, timeLabel: string, today: string): string {
@@ -1555,7 +1545,7 @@ function EventNeedShift(props: { config: AppConfig; eventTitle: string; shift: A
   const open = Boolean(props.now && !shift.cancelled && !ended);
   const time = clockLabel(shift.start);
   const when = shiftWhen(shift.date, time, props.today);
-  const need = ended ? { tone: 'hidden' as const, text: 'Ended' } : shift.occupied >= shift.capacity ? { tone: 'full' as const, text: 'Full' } : needCopy(shift.occupied, shift.capacity);
+  const need = ended ? { tone: 'hidden' as const, text: 'Ended' } : fillLabel(shift);
   const rowClass = ended ? 'desk-row is-ended' : 'desk-row';
   return (
     <li class="need-pick">
@@ -2274,9 +2264,5 @@ function shiftClockLine(shift: Pick<AdminShiftSummary, 'date' | 'start' | 'end'>
 
 function fillStatus(shift: Pick<AdminShiftSummary, 'capacity' | 'occupied' | 'cancelled'>): { tone: 'full' | 'open' | 'needs' | 'cancelled'; text: string } {
   if (shift.cancelled) return { tone: 'cancelled', text: 'Cancelled' };
-  const filled = Math.min(shift.capacity, Math.max(0, shift.occupied));
-  const open = Math.max(0, shift.capacity - filled);
-  if (open === 0) return { tone: 'full', text: `Full · ${filled} of ${shift.capacity}` };
-  if (open * 2 > shift.capacity) return { tone: 'needs', text: `Needs ${open} · ${filled} of ${shift.capacity}` };
-  return { tone: 'open', text: `${open} open · ${filled} of ${shift.capacity}` };
+  return fillLabel(shift);
 }
