@@ -2,6 +2,7 @@
   bindNav();
   bindCalendar();
   bindViewMenu();
+  bindCoordMenu();
   bindManage();
   bindSignupDates();
   document.querySelectorAll('[data-contact]').forEach(bindContact);
@@ -27,7 +28,7 @@
   }
 
   function bindViewMenu() {
-    var menus = document.querySelectorAll('details.view-menu, details.manage-menu, details.coord-menu');
+    var menus = document.querySelectorAll('details.view-menu, details.manage-menu');
     if (!menus.length) return;
     document.addEventListener('click', function (event) {
       for (var i = 0; i < menus.length; i += 1) {
@@ -38,6 +39,16 @@
     document.addEventListener('keydown', function (event) {
       if (event.key !== 'Escape') return;
       for (var i = 0; i < menus.length; i += 1) menus[i].open = false;
+    });
+  }
+
+  function bindCoordMenu() {
+    var menu = document.querySelector('.coord-menu');
+    if (!menu) return;
+    menu.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return;
+      var active = document.activeElement;
+      if (active && menu.contains(active)) active.blur();
     });
   }
 

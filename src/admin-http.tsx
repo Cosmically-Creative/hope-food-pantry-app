@@ -298,7 +298,7 @@ function showHome(
   return html(
     c,
     services,
-    newEvent ? 'New event · Hope Volunteer' : 'Coordinator · Hope Volunteer',
+    newEvent ? 'New event · Hope Volunteer' : 'Shifts · Hope Volunteer',
     <AdminHome
       config={services.config}
       name={session.name}

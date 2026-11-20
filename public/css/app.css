@@ -445,39 +445,12 @@ a.btn:active {
   content: none;
 }
 
-/* Coordinator dropdown in the session bar, signed in. Same pattern as the view menu: a white card under the pill. */
+/* Coordinator menu in the session bar, signed in. A real pill link with the three sections in a card; opens on hover on desktop. */
 .session-bar .coord-menu {
   position: relative;
 }
 
-.session-bar .coord-menu > summary {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  background: transparent;
-  color: #222;
-  font: inherit;
-  font-size: 18px;
-  font-weight: 400;
-  line-height: 1;
-  text-decoration: none;
-  cursor: pointer;
-  transition: transform 0.3s;
-}
-
-.session-bar .coord-menu > summary::-webkit-details-marker {
-  display: none;
-}
-
-.session-bar .coord-menu > summary::marker {
-  content: "";
-}
-
-.session-bar .coord-menu > summary::after {
+.session-bar .coord-menu > a::after {
   content: "";
   width: 0.4rem;
   height: 0.4rem;
@@ -487,31 +460,9 @@ a.btn:active {
   transform: translateY(-0.12rem) rotate(45deg);
 }
 
-.session-bar .coord-menu[open] > summary::after {
+.session-bar .coord-menu:hover > a::after,
+.session-bar .coord-menu:focus-within > a::after {
   transform: translateY(0.12rem) rotate(225deg);
-}
-
-.session-bar .coord-menu > summary:hover,
-.session-bar .coord-menu > summary:active {
-  transform: scale(1.1);
-  background: transparent;
-  color: #444;
-}
-
-/* On a coordinator page the pill is bold with the same gold line as the session-bar links. */
-.session-bar .coord-menu > summary.session-here {
-  font-weight: 650;
-}
-
-.session-bar .coord-menu > summary.session-here::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 7px;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--hope-gold);
 }
 
 .coord-menu-list {
@@ -519,13 +470,28 @@ a.btn:active {
   z-index: 1001;
   top: calc(100% + 0.35rem);
   right: 0;
-  display: grid;
+  display: none;
   min-width: 9.5rem;
   padding: 0.3rem;
   background: #fff;
   border: 1px solid var(--hope-border-2);
   border-radius: 1rem;
   box-shadow: var(--hope-shadow);
+}
+
+/* Invisible bridge over the gap, so the card stays open while the pointer crosses it. */
+.coord-menu-list::before {
+  content: "";
+  position: absolute;
+  top: -0.5rem;
+  left: 0;
+  right: 0;
+  height: 0.5rem;
+}
+
+.session-bar .coord-menu:hover .coord-menu-list,
+.session-bar .coord-menu:focus-within .coord-menu-list {
+  display: grid;
 }
 
 .coord-menu-list a {
@@ -543,26 +509,13 @@ a.btn:active {
   white-space: nowrap;
 }
 
+/* The session-bar links scale up on hover; the menu links must not, so the highlight stays inside the card. */
 .coord-menu-list a:hover,
 .coord-menu-list a:active {
+  transform: none;
   background: var(--hope-blue-75);
   color: var(--hope-ink);
   text-decoration: none;
-}
-
-.coord-menu-list a[aria-current] {
-  font-weight: 650;
-}
-
-.coord-menu-list a[aria-current]::after {
-  content: "";
-  position: absolute;
-  left: 0.8rem;
-  right: 0.8rem;
-  bottom: 9px;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--hope-gold);
 }
 
 /* Phone and tablet: no dropdown inside the ☰ menu, a second plain row instead. Hidden on desktop. */
@@ -4379,21 +4332,6 @@ button.btn-quiet::before {
     color: var(--hope-ink-2);
     font-size: 0.875rem;
     font-weight: 500;
-  }
-
-  .session-sections a[aria-current] {
-    font-weight: 650;
-  }
-
-  .session-sections a[aria-current]::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 7px;
-    height: 2px;
-    border-radius: 999px;
-    background: var(--hope-gold);
   }
 
   .header.nav-open ~ main .session-bar {

@@ -38,7 +38,6 @@ export function Layout(props: {
   const home = appPath(props.config, '/');
   const coordinator = appPath(props.config, props.account ? '/admin' : '/login');
   const coordinatorHere = pathIs(props.path, coordinator);
-  const adminHere = pathIs(props.path, appPath(props.config, '/admin'));
   const sections = props.account ? coordinatorSections(props.config, props.path) : [];
   const volunteeringCurrent = props.path === home ? 'page' : undefined;
   const logo = asset(props.config, '/img/logo.png');
@@ -113,8 +112,10 @@ export function Layout(props: {
               Sign Up
             </a>
             {props.account ? (
-              <details class="coord-menu">
-                <summary class={adminHere ? 'session-here' : undefined}>Coordinator</summary>
+              <div class="coord-menu">
+                <a href={appPath(props.config, '/admin')} aria-haspopup="true">
+                  Coordinator
+                </a>
                 <div class="coord-menu-list">
                   {sections.map((section) => (
                     <a key={section.key} href={section.href} aria-current={section.current}>
@@ -122,7 +123,7 @@ export function Layout(props: {
                     </a>
                   ))}
                 </div>
-              </details>
+              </div>
             ) : (
               <a href={coordinator} class="session-entry" aria-current={coordinatorHere ? 'page' : undefined}>
                 Coordinator

@@ -264,7 +264,7 @@ export function AdminHome(props: {
     <>
       <header class="desk-intro desk-home-intro">
         <div class="desk-home-copy">
-          <h1>Coordinator</h1>
+          <h1>Shifts</h1>
           <p class="desk-date">{clock.dateLabel}</p>
           <p class="desk-signed">
             Signed in as <strong>{props.name}</strong>. This sign-in ends on {sessionEnds.dateLabel}.
@@ -534,7 +534,6 @@ export function AdminsPage(props: {
     <>
       <Crumb
         items={[
-          { href: appPath(props.config, '/admin'), label: 'Coordinator' },
           { href: appPath(props.config, '/admin/settings'), label: 'Settings' },
           { label: 'Administrators' },
         ]}
@@ -782,7 +781,6 @@ export function ContactPage(props: {
     <>
       <Crumb
         items={[
-          { href: appPath(props.config, '/admin'), label: 'Coordinator' },
           { href: appPath(props.config, '/admin/contacts'), label: 'Contacts' },
           { label: props.contact.name },
         ]}
@@ -893,7 +891,7 @@ export function EventEditor(props: {
     <div class="event-page">
       {event ? (
         <header class="event-head">
-          <Crumb items={[{ href: appPath(props.config, '/admin'), label: 'Coordinator' }, { label: props.heading }]} />
+          <Crumb items={[{ href: appPath(props.config, '/admin'), label: 'Shifts' }, { label: props.heading }]} />
           <div class="event-titlebar">
             <div class="event-title">
               <h1>{props.heading}</h1>
@@ -970,7 +968,7 @@ export function TemplateEditor(props: {
     <>
       <Crumb
         items={[
-          { href: appPath(props.config, '/admin'), label: 'Coordinator' },
+          { href: appPath(props.config, '/admin'), label: 'Shifts' },
           { href: appPath(props.config, `/admin/events/${props.eventId}`), label: props.eventTitle },
           { label: props.heading },
         ]}
@@ -1008,7 +1006,7 @@ export function ShiftEditor(props: {
     <div class="event-page">
       <Crumb
         items={[
-          { href: appPath(props.config, '/admin'), label: 'Coordinator' },
+          { href: appPath(props.config, '/admin'), label: 'Shifts' },
           { href: appPath(props.config, `/admin/events/${props.eventId}`), label: props.eventTitle },
           { label: 'New shift' },
         ]}
@@ -1054,7 +1052,7 @@ export function ShiftRoster(props: {
     <div class="event-page">
       <Crumb
         items={[
-          { href: appPath(props.config, '/admin'), label: 'Coordinator' },
+          { href: appPath(props.config, '/admin'), label: 'Shifts' },
           { href: appPath(props.config, `/admin/events/${props.shift.eventId}`), label: props.shift.eventTitle },
           { label: props.shift.role },
         ]}
