@@ -265,6 +265,30 @@ export function removeContact(db: Database.Database, coordinatorId: number, id: 
 }
 
 /**
+ * Removes several contacts at once, in one transaction.
+ * If any id is missing, nothing is removed. Signups are never touched.
+ */
+export function removeContacts(
+  db: Database.Database,
+  coordinatorId: number,
+  ids: number[],
+  now: string,
+): { ok: true; count: number } | { ok: false } {
+  if (ids.length === 0) return { ok: true, count: 0 };
+  return db.transaction(() => {
+    const find = db.prepare('SELECT id FROM contacts WHERE id = ?');
+    for (const id of ids) {
+      if (!find.get(id)) return { ok: false } as const;
+    }
+    const del = db.prepare('DELETE FROM contacts WHERE id = ?');
+    let count = 0;
+    for (const id of ids) count += del.run(id).changes;
+    writeAudit(db, coordinatorId, 'contacts.remove', { count, ids }, now);
+    return { ok: true, count } as const;
+  })();
+}
+
+/**
  * Saves the person from a confirmed signup.
  * The same name and email updates that contact. A different name is a new contact, even with the same email.
  * A blank phone does not erase a phone already saved (legacy or cleared records).

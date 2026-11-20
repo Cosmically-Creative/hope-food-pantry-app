@@ -1,11 +1,13 @@
 import type Database from 'better-sqlite3';
 
 /** Records an admin or host action. Detail is ids and counts only, never addresses or notes. */
+export type AuditDetail = Record<string, number | number[]>;
+
 export function writeAudit(
   db: Database.Database,
   coordinatorId: number | null,
   action: string,
-  detail: Record<string, number>,
+  detail: AuditDetail,
   now: string,
 ): void {
   const json = JSON.stringify(detail);

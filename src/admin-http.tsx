@@ -91,6 +91,7 @@ import {
   loadContacts,
   parseContactSkips,
   removeContact,
+  removeContacts,
   saveManualContact,
   contactSignupShifts,
   walkInFromContact,
@@ -154,6 +155,7 @@ export function registerAdmin(app: Hono, services: AdminServices): void {
   app.post(appPath(config, '/admin/contacts/new'), (c) => submitNewContact(c, services));
   app.post(appPath(config, '/admin/contacts/import'), (c) => submitImportContacts(c, services));
   app.post(appPath(config, '/admin/contacts/export'), (c) => submitExportContacts(c, services));
+  app.post(appPath(config, '/admin/contacts/remove'), (c) => submitRemoveContacts(c, services));
   app.get(appPath(config, '/admin/contacts/:id/remove'), (c) => showRemoveContact(c, services));
   app.post(appPath(config, '/admin/contacts/:id/remove'), (c) => submitRemoveContact(c, services));
   app.post(appPath(config, '/admin/contacts/:id/add'), (c) => submitAddContactToShift(c, services));
@@ -364,6 +366,7 @@ function showContacts(
   services: AdminServices,
   options?: {
     error?: string;
+    removeError?: string;
     status?: 200 | 400 | 403;
     confirm?: ConfirmPrompt;
     manual?: { values: ContactManualValues; errors: ContactManualErrors };
@@ -384,6 +387,8 @@ function showContacts(
       query={loaded.query}
       limit={contactListLimit(c.req.query('shown'))}
       notice={options?.error ? undefined : knownNotice(c.req.query('notice'))}
+      noticeText={contactsRemovedNotice(c.req.query('removed'))}
+      removeError={options?.removeError}
       summary={options?.error ? undefined : contactSummary(c)}
       importError={options?.error}
       manual={options?.manual}
@@ -595,6 +600,20 @@ async function submitRemoveContact(c: Context, services: AdminServices): Promise
     const removed = removeContact(services.db, session.coordinatorId, id, services.now());
     if (!removed) return missing(c, services);
     return c.redirect(appPath(services.config, '/admin/contacts?notice=contact-removed'), 303);
+  } catch (err) {
+    return saveFailed(c, services, session, err);
+  }
+}
+
+async function submitRemoveContacts(c: Context, services: AdminServices): Promise<Response> {
+  const session = await postedSession(c, services);
+  if (session instanceof Response) return session;
+  const ids = idList(session.body, 'contact[]');
+  if (!ids) return showContacts(c, services, { removeError: 'That saved contact is not available.', status: 400 });
+  try {
+    const removed = removeContacts(services.db, session.coordinatorId, ids, services.now());
+    if (!removed.ok) return showContacts(c, services, { removeError: 'That saved contact is not available.', status: 400 });
+    return c.redirect(appPath(services.config, `/admin/contacts?removed=${removed.count}`), 303);
   } catch (err) {
     return saveFailed(c, services, session, err);
   }
@@ -1786,6 +1805,13 @@ function wholeNumber(value: string | undefined): number | null {
   if (!/^\d{1,6}$/.test(value)) return null;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+/** Notice text after a bulk removal. Blank unless the count is a real positive number. */
+function contactsRemovedNotice(value: string | undefined): string | undefined {
+  const count = wholeNumber(value);
+  if (count === null || count === 0) return undefined;
+  return count === 1 ? '1 contact removed.' : `${count} contacts removed.`;
 }
 
 function importLocation(config: AppConfig, result: ContactImportSummary): string {

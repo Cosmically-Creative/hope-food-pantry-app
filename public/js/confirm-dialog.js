@@ -15,12 +15,23 @@
     return link.getAttribute(name) || '';
   };
 
+  // A box inside a [hidden] subtree is not shown to the user (rows still behind "See more"), so it never counts.
+  var visibleBoxes = function (selector) {
+    var all = document.querySelectorAll(selector);
+    var shown = [];
+    for (var i = 0; i < all.length; i += 1) {
+      if (all[i].closest('[hidden]')) continue;
+      shown.push(all[i]);
+    }
+    return shown;
+  };
+
   var chosenFor = function (name) {
-    return document.querySelectorAll('input[data-pick="' + name + '"]:checked');
+    return visibleBoxes('input[data-pick="' + name + '"]:checked');
   };
 
   var boxesFor = function (name) {
-    return document.querySelectorAll('input[data-pick="' + name + '"]');
+    return visibleBoxes('input[data-pick="' + name + '"]');
   };
 
   var fill = function (link) {
@@ -88,7 +99,12 @@
     if (blocked > 0 && kept.length > 0) {
       detail.textContent = kept.length + ' of ' + chosen.length + ' can be ' + verb;
     } else {
-      detail.textContent = chosen.length === 1 ? '1 selected' : chosen.length + ' selected';
+      var unit = text(link, 'data-confirm-unit');
+      if (unit) {
+        detail.textContent = chosen.length === 1 ? '1 ' + unit + ' will be removed.' : chosen.length + ' ' + unit + 's will be removed.';
+      } else {
+        detail.textContent = chosen.length === 1 ? '1 selected' : chosen.length + ' selected';
+      }
     }
     detail.hidden = false;
     if (weekly && weeklyNote) notes.push(weeklyNote);
@@ -109,7 +125,8 @@
   var syncPicks = function () {
     document.querySelectorAll('[data-confirm-pick]').forEach(function (control) {
       var name = control.getAttribute('data-confirm-pick');
-      control.hidden = !name || chosenFor(name).length === 0;
+      var hide = !name || chosenFor(name).length === 0;
+      if (control.hidden !== hide) control.hidden = hide;
     });
     document.querySelectorAll('[data-pick-all]').forEach(function (all) {
       var name = all.getAttribute('data-pick-all');
@@ -163,5 +180,10 @@
   });
 
   syncPicks();
+  // Re-check the pick state when rows appear or disappear, e.g. "See more" revealing contacts.
+  // The guarded writes in syncPicks keep this from looping.
+  if (typeof MutationObserver === 'function') {
+    new MutationObserver(syncPicks).observe(document.body, { attributes: true, attributeFilter: ['hidden'], subtree: true });
+  }
   if (dialog.open) show();
 })();

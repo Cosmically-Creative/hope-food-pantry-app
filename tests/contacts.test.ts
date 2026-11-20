@@ -799,6 +799,117 @@ describe('contact pages', () => {
   });
 });
 
+describe('bulk contact removal', () => {
+  function insertContact(
+    db: Awaited<ReturnType<typeof openDb>>,
+    person: { first: string; last: string; email: string; phone?: string | null },
+  ): number {
+    return Number(
+      db.prepare(
+        `INSERT INTO contacts (first_name, last_name, email, email_norm, phone, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(person.first, person.last, person.email, person.email.toLowerCase(), person.phone ?? null, NOW, NOW).lastInsertRowid,
+    );
+  }
+
+  async function postBulk(
+    app: Awaited<ReturnType<typeof buildApp>>['app'],
+    cookie: string | undefined,
+    ids: number[],
+    origin = ORIGIN,
+  ) {
+    const current = await app.request('/admin/contacts', { headers: cookie ? { cookie } : {} });
+    const token = /name="csrf" value="([^"]*)"/.exec(await current.text())?.[1] ?? '';
+    const body = new URLSearchParams({ csrf: token });
+    for (const id of ids) body.append('contact[]', String(id));
+    return app.request('/admin/contacts/remove', {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/x-www-form-urlencoded', ...(cookie ? { cookie } : {}) },
+      body,
+    });
+  }
+
+  it('shows a checkbox per contact with Select all and Remove selected', async () => {
+    const { app, db } = await buildApp();
+    const cookie = await signIn(app, db);
+    insertContact(db, { first: 'Ada', last: 'One', email: 'ada@example.invalid' });
+    insertContact(db, { first: 'Bea', last: 'Two', email: 'bea@example.invalid', phone: '712-555-0100' });
+    const page = await (await app.request('/admin/contacts', { headers: { cookie } })).text();
+    expect(page).toContain('data-pick-all="contact"');
+    expect(page).toContain('Select all');
+    expect(page).toContain('Remove selected');
+    expect(page).toContain('data-confirm-pick="contact"');
+    expect(page).toContain('title="Remove selected contacts"');
+    expect(page).toContain('data-pick="contact" value="1"');
+    expect(page).toContain('data-pick="contact" value="2"');
+    expect(page).toContain('aria-label="Select Ada One"');
+    expect(page).toContain('aria-label="Select Bea Two"');
+  });
+
+  it('removes exactly the chosen contacts, keeps their signups, and writes one audit row', async () => {
+    const { app, db } = await buildApp();
+    const cookie = await signIn(app, db);
+    const adaId = insertContact(db, { first: 'Ada', last: 'One', email: 'ada@example.invalid' });
+    const beaId = insertContact(db, { first: 'Bea', last: 'Two', email: 'bea@example.invalid' });
+    const camId = insertContact(db, { first: 'Cam', last: 'Three', email: 'cam@example.invalid' });
+    const shiftId = insertShift(db);
+    insertSignup(db, shiftId, { name: 'Ada One', email: 'ada@example.invalid' });
+
+    const removed = await postBulk(app, cookie, [adaId, beaId]);
+    expect(removed.status).toBe(303);
+    expect(removed.headers.get('location')).toBe('/admin/contacts?removed=2');
+    const page = await (await app.request(removed.headers.get('location') ?? '', { headers: { cookie } })).text();
+    expect(page).toContain('2 contacts removed.');
+    expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(1);
+    expect(db.prepare('SELECT email FROM contacts WHERE id = ?').get(camId)).toEqual({ email: 'cam@example.invalid' });
+    expect(
+      count(db, "SELECT COUNT(*) AS n FROM signups WHERE email_norm = 'ada@example.invalid' AND status = 'confirmed'"),
+    ).toBe(1);
+    const audits = db.prepare(`SELECT detail_json AS detail_json FROM audit WHERE action = 'contacts.remove'`).all() as {
+      detail_json: string;
+    }[];
+    const audit = audits[0];
+    expect(audits).toHaveLength(1);
+    if (!audit) return;
+    expect(JSON.parse(audit.detail_json)).toEqual({ count: 2, ids: [adaId, beaId] });
+    expect(audit.detail_json).not.toContain('@');
+  });
+
+  it('shows one removal notice for a single contact', async () => {
+    const { app, db } = await buildApp();
+    const cookie = await signIn(app, db);
+    const adaId = insertContact(db, { first: 'Ada', last: 'One', email: 'ada@example.invalid' });
+    const removed = await postBulk(app, cookie, [adaId]);
+    expect(removed.status).toBe(303);
+    expect(removed.headers.get('location')).toBe('/admin/contacts?removed=1');
+    const page = await (await app.request(removed.headers.get('location') ?? '', { headers: { cookie } })).text();
+    expect(page).toContain('1 contact removed.');
+  });
+
+  it('removes nothing when one chosen contact is missing', async () => {
+    const { app, db } = await buildApp();
+    const cookie = await signIn(app, db);
+    const adaId = insertContact(db, { first: 'Ada', last: 'One', email: 'ada@example.invalid' });
+    const removed = await postBulk(app, cookie, [adaId, 9999]);
+    expect(removed.status).toBe(400);
+    expect(await removed.text()).toContain('That saved contact is not available.');
+    expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(1);
+    expect(count(db, `SELECT COUNT(*) AS n FROM audit WHERE action = 'contacts.remove'`)).toBe(0);
+  });
+
+  it('asks a signed-out visitor to sign in and rejects a foreign origin', async () => {
+    const { app, db } = await buildApp();
+    const loggedOut = await postBulk(app, undefined, [1]);
+    expect(loggedOut.status).toBe(303);
+    expect(loggedOut.headers.get('location')).toBe('/login');
+    const cookie = await signIn(app, db);
+    insertContact(db, { first: 'Ada', last: 'One', email: 'ada@example.invalid' });
+    const foreign = await postBulk(app, cookie, [1], 'https://elsewhere.example');
+    expect(foreign.status).toBe(403);
+    expect(count(db, 'SELECT COUNT(*) AS n FROM contacts')).toBe(1);
+  });
+});
+
 async function openDb() {
   const root = mkdtempSync(path.join(tmpdir(), 'hope-contacts-'));
   dirs.push(root);

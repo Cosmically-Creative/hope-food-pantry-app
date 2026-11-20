@@ -47,6 +47,8 @@ const SHIFT_WAIT_BODY = 'Cancel this shift, or wait until it has ended, before r
 const SHIFT_WEEKLY_NOTE =
   'This date came from a weekly template that is still active. Saving that template puts this date back. End that template first if the date should stay gone.';
 const PERSON_DELETE_BODY = 'This deletes their name, email, phone, and notes from the roster. It does not send email.';
+const CONTACT_REMOVE_MANY_BODY =
+  'This deletes their names, emails, and phones from the contact list. Their signups stay, and no email is sent.';
 const PERSON_WAIT_BODY = 'Cancel this signup before removing it.';
 const PERSON_CANCEL_BODY = 'Cancelling a signup emails them. Their old private link stops working, and the email includes a new one.';
 const SHIFT_CANCEL_EMPTY = 'No one is signed up. Cancelling closes the shift, takes it off this list, and does not send email.';
@@ -624,6 +626,8 @@ export function ContactsPage(props: {
   query: string;
   limit: number;
   notice?: string;
+  noticeText?: string;
+  removeError?: string;
   summary?: ContactImportSummary;
   importError?: string;
   manual?: { values: ContactManualValues; errors: ContactManualErrors };
@@ -645,7 +649,7 @@ export function ContactsPage(props: {
   return (
     <>
       <h1>Contacts</h1>
-      {props.summary ? <Notice text={contactImportSentence(props.summary)} /> : <Notice notice={props.notice} />}
+      {props.summary ? <Notice text={contactImportSentence(props.summary)} /> : <Notice text={props.noticeText} notice={props.notice} />}
       {props.summary && props.summary.skips.length > 0 ? (
         <ul>
           {props.summary.skips.map((skip) => (
@@ -654,7 +658,8 @@ export function ContactsPage(props: {
         </ul>
       ) : null}
       {hiddenSkips > 0 ? <p class="panel-note">{hiddenSkips === 1 ? '1 more row was skipped.' : `${hiddenSkips} more rows were skipped.`}</p> : null}
-      <section class="desk-events" aria-labelledby="contacts-heading">
+      {props.removeError ? <p class="error">{props.removeError}</p> : null}
+      <section class="desk-panel contacts-board" aria-labelledby="contacts-heading">
         <h2 id="contacts-heading">{heading}</h2>
         <div class="contact-toolbar">
         {props.total > 0 ? (
@@ -717,11 +722,34 @@ export function ContactsPage(props: {
         </details>
         </div>
         </div>
+        {props.people.length > 0 ? (
+          <div class="desk-actions pick-bar">
+            {props.people.length > 1 ? (
+              <label class="pick-all">
+                <input type="checkbox" data-pick-all="contact" />
+                Select all
+              </label>
+            ) : null}
+            <MassRemove
+              pick="contact"
+              unit="contact"
+              action={appPath(props.config, '/admin/contacts/remove')}
+              title="Remove selected contacts"
+              body={CONTACT_REMOVE_MANY_BODY}
+              submit="Remove selected"
+            >
+              Remove selected
+            </MassRemove>
+          </div>
+        ) : null}
         {props.total > 0 && props.people.length === 0 ? <p class="empty">No contacts match.</p> : null}
         {props.people.length > 0 ? (
           <ul class="contact-list" id="contacts-list">
             {props.people.map((person, index) => (
               <li class="contact-row" data-contact-row="1" hidden={index >= props.limit ? true : undefined} key={person.id}>
+                <label class="pick">
+                  <input type="checkbox" data-pick="contact" value={String(person.id)} aria-label={`Select ${person.name}`} />
+                </label>
                 <p class="contact-name">
                   <strong>
                     <a href={appPath(props.config, `/admin/contacts/${person.id}`)}>{person.name}</a>
@@ -730,7 +758,11 @@ export function ContactsPage(props: {
                 <p class="contact-email">{person.email}</p>
                 <p class="contact-phone">{person.phone ?? ''}</p>
                 <p class="contact-remove">
-                  <ConfirmAnchor href={appPath(props.config, `/admin/contacts/${person.id}/remove`)} prompt={contactRemovalPrompt(person)}>
+                  <ConfirmAnchor
+                    class="text-action"
+                    href={appPath(props.config, `/admin/contacts/${person.id}/remove`)}
+                    prompt={contactRemovalPrompt(person)}
+                  >
                     Remove
                   </ConfirmAnchor>
                 </p>
@@ -2142,12 +2174,13 @@ function Notice(props: { notice?: string; text?: string }) {
 }
 
 function MassRemove(props: {
-  pick: 'shift' | 'signup';
+  pick: 'shift' | 'signup' | 'contact';
   action: string;
   title: string;
   body: string;
   submit: string;
   note?: string;
+  unit?: string;
   gate?: 'open' | 'removable';
   verb?: string;
   blocked?: string;
@@ -2169,6 +2202,7 @@ function MassRemove(props: {
       data-confirm-title={props.title}
       data-confirm-body={props.body}
       data-confirm-note-weekly={props.note}
+      data-confirm-unit={props.unit}
       data-confirm-submit={props.submit}
     >
       {props.children}
