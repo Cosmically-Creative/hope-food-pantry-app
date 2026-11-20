@@ -3913,6 +3913,39 @@ button.btn-quiet::before {
   margin: 0 0 0 auto;
 }
 
+/* Wider screens: fixed columns, so a missing phone or a long email never shifts the others. */
+@media (min-width: 42.001em) {
+  .contact-row {
+    display: grid;
+    grid-template-columns: auto minmax(8rem, 1.1fr) minmax(0, 1.6fr) 8.5rem auto;
+    gap: 0 1rem;
+  }
+
+  .contact-phone {
+    min-width: 0;
+  }
+
+  .contact-remove {
+    margin: 0;
+    justify-self: end;
+  }
+}
+
+/* The pick bar keeps the height of the Remove selected button, so ticking a box never pushes the list down. */
+.contacts-board .pick-bar {
+  flex-wrap: nowrap;
+  align-items: center;
+  min-height: 2.6rem;
+}
+
+.contacts-board .pick-bar .btn {
+  min-height: 2.6rem;
+  padding: 0.2rem 0.95rem;
+  line-height: 1.2;
+  width: auto;
+  flex: 0 0 auto;
+}
+
 @media (max-width: 42em) {
   .contact-name {
     flex: 1 1 auto;
